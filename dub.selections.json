@@ -1,0 +1,7 @@
+{
+	"fileVersion": 1,
+	"versions": {
+		"onyx-serial": "0.4.0",
+		"onyx-config": "2.0.4"
+	}
+}

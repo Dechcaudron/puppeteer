@@ -1,0 +1,9 @@
+{
+"name": "pupetteer",
+"description": "A minimal D application.",
+"authors": ["dccdn"],
+
+"dependencies" : {
+		"onyx-serial" : "~>0.4"
+	}
+}
