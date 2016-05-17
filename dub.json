@@ -5,5 +5,7 @@
 
 "dependencies" : {
 		"onyx-serial" : "~>0.4"
-	}
+	},
+
+"targetPath" : "out"
 }
