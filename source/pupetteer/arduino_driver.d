@@ -5,10 +5,13 @@ import pupetteer.serial.BaudRate;
 import pupetteer.serial.Parity;
 
 import std.concurrency;
+import std.conv;
 
 import core.time;
 
-protected alias readListenerDelegate = void delegate (int, float);
+import std.stdio;
+
+protected alias readListenerDelegate = void delegate (ubyte, float) shared;
 
 class ArduinoDriver
 {
@@ -18,14 +21,14 @@ class ArduinoDriver
 		Associative array whose key is the pin in which a listener listens, and
 		its value a slice of delegates which are the listeners themselves
 	*/
-	protected shared ListenerHolder[int] listenerHolders;
+	protected shared ListenerHolder[ubyte] listenerHolders;
 
 	this(string filename, Parity parity = Parity.none, BaudRate baudRate = BaudRate.B9600)
 	{
 		communicator = new ArduinoCommunicator(filename, baudRate, parity, listenerHolders);
 	}
 
-	void listen(int pin, readListenerDelegate listener)
+	void listen(ubyte pin, readListenerDelegate listener)
 	in
 	{
 		assert(listener !is null);
@@ -43,7 +46,7 @@ class ArduinoDriver
 	}
 
 
-	void stopListening(int pin, readListenerDelegate listener)
+	void stopListening(ubyte pin, readListenerDelegate listener)
 	in
 	{
 		assert(listener !is null);
@@ -55,6 +58,15 @@ class ArduinoDriver
 			listenerHolders[pin].remove(listener);
 	}
 
+	void startCommunication()
+	{
+		communicator.startCommunication();
+	}
+
+	void endCommunication()
+	{
+		communicator.endCommunication();
+	}
 
 
 
@@ -62,7 +74,7 @@ class ArduinoDriver
 
 private class ArduinoCommunicator
 {
-	private shared ListenerHolder[int] readListeners;
+	private shared ListenerHolder[ubyte] readListeners;
 
 	private string fileName;
 	private immutable BaudRate baudRate;
@@ -70,7 +82,7 @@ private class ArduinoCommunicator
 
 	private Tid workerId;
 
-	this(string fileName, BaudRate baudRate, Parity parity, shared ListenerHolder[int] readListeners)
+	this(string fileName, BaudRate baudRate, Parity parity, shared ListenerHolder[ubyte] readListeners)
 	{
 		this.fileName = fileName;
 		this.baudRate = baudRate;
@@ -81,14 +93,19 @@ private class ArduinoCommunicator
 
 	public void startCommunication()
 	{
-		spawn(&communicationLoop, fileName, baudRate, parity);
+		workerId = spawn(&communicationLoop, fileName, baudRate, parity);
+	}
+
+	public void endCommunication()
+	{
+		workerId.send(CommunicationMessage(CommunicationMessagePurpose.endCommunication));
 	}
 
 	private void communicationLoop(string fileName, immutable BaudRate baudRate, immutable Parity parity) shared
 	{
 		ISerialPort arduinoSerialPort = ISerialPort.getInstance(fileName, parity, baudRate, 50);
 
-		enum receiveTimeoutMs = 50;
+		enum receiveTimeoutMs = 10;
 		enum bytesReadAtOnce = 1;
 
 		bool shouldContinue = true;
@@ -102,23 +119,87 @@ private class ArduinoCommunicator
 			}
 		}
 
-		void handleReadBytes(byte[] readBytes)
+		void handleReadBytes(ubyte[] readBytes)
+		in
 		{
-			static byte[] readBuffer = [];
+			assert(readBytes !is null);
+			assert(readBytes.length != 0);
+		}
+		body
+		{
+			enum ReadCommands : ubyte
+			{
+				read = 0x1,
+				error = 0xff
+			}
+
+			void handleReadCommand(ubyte[] command)
+			in
+			{
+				assert(command !is null);
+				assert(command.length == 4);
+				assert(command[0] == ReadCommands.read);
+			}
+			body
+			{
+				enum arduinoAnalogReadMax = 1023;
+
+				ubyte pin = command[1];
+				ushort readValue = command[2] * ubyte.init + command[3];
+				float realValue = to!float(readValue) / arduinoAnalogReadMax;
+
+				synchronized(readListeners[pin])
+				{
+					foreach(listener; readListeners[pin].getListeners())
+					{
+						listener(pin, readValue);
+					}
+				}
+			}
+
+			static ubyte[] readBuffer = [];
+
+			readBuffer ~= readBytes;
+
+			//Try to make sense out of the readBytes
+			switch(readBuffer[0])
+			{
+				case ReadCommands.read:
+					if(readBuffer.length < 4)
+						return;
+					else
+					{
+						handleReadCommand(readBuffer[0..4]);
+						readBuffer = readBuffer[4..$];
+					}
+					break;
+
+				case ReadCommands.error:
+					writeln("Error received!");
+					break;
+
+				default:
+					writeln("Unhandled ubyte command received: ", readBuffer[0]);
+			}
 		}
 
 		do
 		{
-			receiveTimeout(msecs(receiveTimeoutMs), &messageHandler);
-
+			writeln("Looping");
 			ubyte[] readBytes = arduinoSerialPort.read(bytesReadAtOnce);
 
+			if(readBytes !is null)
+				handleReadBytes(readBytes);
+
+			receiveTimeout(msecs(receiveTimeoutMs), &messageHandler);
 
 
 		}while(shouldContinue);
+
+		writeln("Ended communicationLoop");
 	}
 
-	private class CommunicationMessage
+	private struct CommunicationMessage
 	{
 		CommunicationMessagePurpose purpose;
 
@@ -155,5 +236,10 @@ private class ListenerHolder
 		import std.algorithm.mutation;
 
 		listeners = listeners.remove!(a => a is listener);
+	}
+
+	public shared(const(readListenerDelegate[])) getListeners() const shared
+	{
+		return listeners;
 	}
 }
