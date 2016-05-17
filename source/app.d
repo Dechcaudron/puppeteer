@@ -5,8 +5,9 @@ import pupetteer.serial.Parity;
 
 void main()
 {
-	ArduinoDriver driver = new ArduinoDriver("", Parity.none, BaudRate.B9600);
-	TestClass test = new TestClass(driver);
+	ArduinoDriver driver = new ArduinoDriver("/dev/ttyACM0", Parity.none, BaudRate.B9600);
+	TestClass test = new TestClass(driver, 0);
+	TestClass test2 = new TestClass(driver, 1);
 	driver.startCommunication();
 
 	int readInt;
@@ -20,14 +21,14 @@ void main()
 
 	driver.endCommunication();
 
-	
+
 }
 
 class TestClass
 {
-	this(ArduinoDriver driver)
+	this(ArduinoDriver driver, ubyte pin)
 	{
-		driver.listen(0, &listener);
+		driver.addListener(pin, &listener);
 	}
 
 	void listener(ubyte pin, float value) shared
