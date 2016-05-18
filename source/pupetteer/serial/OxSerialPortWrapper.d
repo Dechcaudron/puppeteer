@@ -40,10 +40,12 @@ class OxSerialPortWrapper : ISerialPort
 		port = OxSerialPort(filename, mapBaudRate(baudRate), mapParity(parity), timeOutMilliseconds);
 	}
 
-	public void open()
+	public bool open()
 	{
 		if(!port.isOpen)
 			port.open();
+
+		return port.isOpen();
 	}
 
 	public void close()

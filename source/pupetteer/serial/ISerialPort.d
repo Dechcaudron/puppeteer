@@ -9,7 +9,7 @@ interface ISerialPort
 	void write(ubyte[] bytes);
 	ubyte[] read(int maxBytes);
 
-	void open();
+	bool open();
 	void close();
 
 	static ISerialPort getInstance(string filename, Parity parity, BaudRate baudRate, uint timeOutMilliseconds)
