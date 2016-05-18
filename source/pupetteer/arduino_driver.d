@@ -177,15 +177,20 @@ class ArduinoDriver
 					break;
 
 				default:
-					writeln("Unhandled ubyte command received: ", readBuffer[0]);
+					writeln("Unhandled ubyte command received: ", readBuffer[0], ". Cleaning command buffer.");
+					readBuffer = [];
 			}
 		}
 
 		enum portReadTimeoutMs = 200;
 		ISerialPort arduinoSerialPort = ISerialPort.getInstance(fileName, parity, baudRate, portReadTimeoutMs);
 		arduinoSerialPort.open();
-
 		communicationOn = true;
+
+		{
+			import core.thread;
+			Thread.sleep(core.time.dur!("seconds")(1));
+		}
 
 		do
 		{
