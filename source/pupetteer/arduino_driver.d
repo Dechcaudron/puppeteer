@@ -44,6 +44,12 @@ class ArduinoDriver
 		if(pin !in listenerHolders)
 		{
 			listenerHolders[pin] = new shared ListenerHolder(listener);
+
+			if(communicationOn)
+			{
+				workerId.send(CommunicationMessage(CommunicationMessagePurpose.startMonitoring, pin));
+			}
+
 		}else
 		{
 			synchronized(listenerHolders[pin])
@@ -65,6 +71,15 @@ class ArduinoDriver
 		synchronized(listenerHolders[pin])
 		{
 			listenerHolders[pin].remove(listener);
+
+			/*If there are no remaining listeners for that pin,
+			remove the holder and command the puppet to stop monitoring
+			the specified pin*/
+			if(listenerHolders[pin].getListenersNumber == 0)
+			{
+				listenerHolders.remove(pin);
+				workerId.send(CommunicationMessage(CommunicationMessagePurpose.stopMonitoring, pin));
+			}
 		}
 	}
 
@@ -83,14 +98,24 @@ class ArduinoDriver
 		enum receiveTimeoutMs = 10;
 		enum bytesReadAtOnce = 1;
 
+		enum ubyte commandControlByte = 0xff;
+
 		bool shouldContinue = true;
 
-		void messageHandler(CommunicationMessage message)
+		void handleMessage(CommunicationMessage message)
 		{
 			with(CommunicationMessagePurpose)
 			{
-				if(message.purpose == endCommunication)
-					shouldContinue = false;
+				switch(message.purpose)
+				{
+					case endCommunication:
+						shouldContinue = false;
+						break;
+
+					default:
+						writeln("Unhandled message purpose "~to!string(message.purpose)~" received");
+				}
+
 			}
 		}
 
@@ -147,9 +172,7 @@ class ArduinoDriver
 
 			readBuffer ~= readBytes;
 
-			enum ubyte commandBeginByte = 0xff;
-
-			if(readBuffer[0] != commandBeginByte)
+			if(readBuffer[0] != commandControlByte)
 			{
 				writeln("Received corrupt command. Discarding first byte and returning");
 				readBuffer = readBuffer.length != 1? readBuffer[1..$] : [];
@@ -188,8 +211,27 @@ class ArduinoDriver
 		communicationOn = true;
 
 		{
+			//Arduino seems to need some time between port opening and communication start
 			import core.thread;
 			Thread.sleep(core.time.dur!("seconds")(1));
+		}
+
+		void sendStartMonitoringCommand(ubyte pin)
+		{
+			writeln("Sending startMonitoringCommand for pin "~pin);
+			arduinoSerialPort.write([commandControlByte, 0x01, pin]);
+		}
+
+		void sendStopMonitoringCommand(ubyte pin)
+		{
+			writeln("Sending stopMonitoringCommand for pin "~pin);
+			arduinoSerialPort.write([commandControlByte, 0x02, pin]);
+		}
+
+		//Send startMonitoringCommands for already present listeners
+		foreach(pin; listenerHolders.byKey)
+		{
+			sendStartMonitoringCommand(pin);
 		}
 
 		do
@@ -202,14 +244,13 @@ class ArduinoDriver
 				handleReadBytes(readBytes);
 			}
 
-			receiveTimeout(msecs(receiveTimeoutMs), &messageHandler);
+			receiveTimeout(msecs(receiveTimeoutMs), &handleMessage);
 
 
 		}while(shouldContinue);
 
-		arduinoSerialPort.close();
-
 		communicationOn = false;
+		arduinoSerialPort.close();
 
 		writeln("Ended communicationLoop");
 	}
@@ -219,8 +260,24 @@ class ArduinoDriver
 private struct CommunicationMessage
 {
 	CommunicationMessagePurpose purpose;
+	ubyte pin;
 
 	this(CommunicationMessagePurpose purpose)
+	in
+	{
+		assert(purpose == CommunicationMessagePurpose.endCommunication);
+	}
+	body
+	{
+		this.purpose = purpose;
+	}
+
+	this(CommunicationMessagePurpose purpose, ubyte pin)
+	in
+	{
+		assert(purpose != CommunicationMessagePurpose.write);
+	}
+	body
 	{
 		this.purpose = purpose;
 	}
@@ -229,6 +286,8 @@ private struct CommunicationMessage
 private enum CommunicationMessagePurpose
 {
 	endCommunication,
+	startMonitoring,
+	stopMonitoring,
 	read,
 	write
 }
