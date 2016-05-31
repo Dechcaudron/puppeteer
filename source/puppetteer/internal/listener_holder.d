@@ -1,6 +1,6 @@
-module pupetteer.internal.listener_holder;
+module puppetteer.internal.listener_holder;
 
-import pupetteer.arduino_driver : readListenerDelegate;
+import puppetteer.arduino_driver : readListenerDelegate;
 
 class ListenerHolder
 {

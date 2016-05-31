@@ -1,10 +1,10 @@
-module pupetteer.arduino_driver;
+module puppetteer.arduino_driver;
 
-import pupetteer.serial.ISerialPort;
-import pupetteer.serial.BaudRate;
-import pupetteer.serial.Parity;
+import puppetteer.serial.ISerialPort;
+import puppetteer.serial.BaudRate;
+import puppetteer.serial.Parity;
 
-import pupetteer.internal.listener_holder;
+import puppetteer.internal.listener_holder;
 
 import std.concurrency;
 import std.conv;
@@ -111,6 +111,11 @@ class ArduinoDriver
 					case endCommunication:
 						shouldContinue = false;
 						break;
+                        
+                    case startMonitoring:
+                        //TODO: needs fix
+                        //sendStartMonitoringCommand(message.pin);
+                        break;
 
 					default:
 						writeln("Unhandled message purpose "~to!string(message.purpose)~" received");
@@ -213,18 +218,18 @@ class ArduinoDriver
 		{
 			//Arduino seems to need some time between port opening and communication start
 			import core.thread;
-			Thread.sleep(core.time.dur!("seconds")(1));
+			Thread.sleep(dur!"seconds"(1));
 		}
 
 		void sendStartMonitoringCommand(ubyte pin)
 		{
-			writeln("Sending startMonitoringCommand for pin "~pin);
+			writeln("Sending startMonitoringCommand for pin "~to!string(pin));
 			arduinoSerialPort.write([commandControlByte, 0x01, pin]);
 		}
 
 		void sendStopMonitoringCommand(ubyte pin)
 		{
-			writeln("Sending stopMonitoringCommand for pin "~pin);
+            writeln("Sending stopMonitoringCommand for pin "~to!string(pin));
 			arduinoSerialPort.write([commandControlByte, 0x02, pin]);
 		}
 
