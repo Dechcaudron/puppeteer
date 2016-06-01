@@ -10,6 +10,7 @@ import std.concurrency;
 import std.conv;
 
 import core.time;
+import core.thread;
 
 import std.stdio;
 
@@ -47,6 +48,7 @@ class ArduinoDriver
 
 			if(communicationOn)
 			{
+				writeln("Sending message to dynamically enable monitoring of pin "~to!string(pin));
 				workerId.send(CommunicationMessage(CommunicationMessagePurpose.startMonitoring, pin));
 			}
 
@@ -102,6 +104,20 @@ class ArduinoDriver
 
 		bool shouldContinue = true;
 
+		ISerialPort arduinoSerialPort;
+
+		void sendStartMonitoringCommand(ISerialPort serialPort, ubyte pin)
+		{
+			writeln("Sending startMonitoringCommand for pin "~to!string(pin));
+			serialPort.write([commandControlByte, 0x01, pin]);
+		}
+
+		void sendStopMonitoringCommand(ISerialPort serialPort, ubyte pin)
+		{
+            writeln("Sending stopMonitoringCommand for pin "~to!string(pin));
+			serialPort.write([commandControlByte, 0x02, pin]);
+		}
+
 		void handleMessage(CommunicationMessage message)
 		{
 			with(CommunicationMessagePurpose)
@@ -111,11 +127,14 @@ class ArduinoDriver
 					case endCommunication:
 						shouldContinue = false;
 						break;
-                        
+
                     case startMonitoring:
-                        //TODO: needs fix
-                        //sendStartMonitoringCommand(message.pin);
+                        sendStartMonitoringCommand(arduinoSerialPort, message.pin);
                         break;
+
+					case stopMonitoring:
+						sendStopMonitoringCommand(arduinoSerialPort, message.pin);
+						break;
 
 					default:
 						writeln("Unhandled message purpose "~to!string(message.purpose)~" received");
@@ -177,10 +196,15 @@ class ArduinoDriver
 
 			readBuffer ~= readBytes;
 
+			void popReadBuffer(size_t elements = 1)
+			{
+				readBuffer = readBuffer.length >= elements ? readBuffer[elements..$] : [];
+			}
+
 			if(readBuffer[0] != commandControlByte)
 			{
 				writeln("Received corrupt command. Discarding first byte and returning");
-				readBuffer = readBuffer.length != 1? readBuffer[1..$] : [];
+				popReadBuffer();
 				return;
 			}
 
@@ -193,11 +217,9 @@ class ArduinoDriver
 				case ReadCommands.read:
 					if(readBuffer.length < 5)
 						return;
-					else
-					{
-						handleReadCommand(readBuffer[1..5]);
-						readBuffer = readBuffer[5..$];
-					}
+
+					handleReadCommand(readBuffer[1..5]);
+					popReadBuffer(5);
 					break;
 
 				case ReadCommands.error:
@@ -211,32 +233,50 @@ class ArduinoDriver
 		}
 
 		enum portReadTimeoutMs = 200;
-		ISerialPort arduinoSerialPort = ISerialPort.getInstance(fileName, parity, baudRate, portReadTimeoutMs);
+		arduinoSerialPort = ISerialPort.getInstance(fileName, parity, baudRate, portReadTimeoutMs);
 		arduinoSerialPort.open();
 		communicationOn = true;
 
+		//Arduino seems to need some time between port opening and communication start
+		Thread.sleep(dur!"seconds"(1));
+
+		enum ubyte[] puppetteerReadyCommand = [0x0, 0x0];
+		arduinoSerialPort.write([commandControlByte] ~ puppetteerReadyCommand);
+
+		//Wait for the puppet to answer it is ready
 		{
-			//Arduino seems to need some time between port opening and communication start
-			import core.thread;
-			Thread.sleep(dur!"seconds"(1));
+			enum ubyte[] puppetReadyCommand = [0x0, 0x0];
+			ubyte[] cache = [];
+			enum msBetweenChecks = 100;
+
+			while(true)
+			{
+				ubyte[] readBytes = arduinoSerialPort.read(1);
+
+				if(readBytes !is null)
+				{
+					cache ~= readBytes;
+					writeln("cache is currently ", cache);
+
+					if(cache.length == 3)
+					{
+						if(cache == [commandControlByte] ~ puppetReadyCommand)
+							break; //Ready!
+						else
+							cache = cache[1..$]; //pop front and continue
+					}
+				}
+
+				Thread.sleep(dur!"msecs"(msBetweenChecks));
+			}
 		}
 
-		void sendStartMonitoringCommand(ubyte pin)
-		{
-			writeln("Sending startMonitoringCommand for pin "~to!string(pin));
-			arduinoSerialPort.write([commandControlByte, 0x01, pin]);
-		}
-
-		void sendStopMonitoringCommand(ubyte pin)
-		{
-            writeln("Sending stopMonitoringCommand for pin "~to!string(pin));
-			arduinoSerialPort.write([commandControlByte, 0x02, pin]);
-		}
+		writeln("puppet is ready!");
 
 		//Send startMonitoringCommands for already present listeners
 		foreach(pin; listenerHolders.byKey)
 		{
-			sendStartMonitoringCommand(pin);
+			sendStartMonitoringCommand(arduinoSerialPort, pin);
 		}
 
 		do
@@ -245,7 +285,7 @@ class ArduinoDriver
 
 			if(readBytes !is null)
 			{
-				writeln("Read bytes ", readBytes);
+				//writeln("Read bytes ", readBytes);
 				handleReadBytes(readBytes);
 			}
 
@@ -285,6 +325,7 @@ private struct CommunicationMessage
 	body
 	{
 		this.purpose = purpose;
+		this.pin = pin;
 	}
 }
 
