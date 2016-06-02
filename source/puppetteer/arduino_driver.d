@@ -26,6 +26,9 @@ class ArduinoDriver
 	immutable Parity parity;
 	immutable BaudRate baudRate;
 
+	//This slice will be populated only if setPWM is called while workerId is still empty
+	private (immutable tuple(int, int))[] queuedPWM;
+
 	private Tid workerId;
 
 	this(string filename, Parity parity = Parity.none, BaudRate baudRate = BaudRate.B9600)
@@ -85,9 +88,25 @@ class ArduinoDriver
 		}
 	}
 
+	void setPWM(ubyte pin, ubyte value)
+	{
+		if(communicationOn)
+		{
+			workerId.send(CommunicationMessage(CommunicationMessagePurpose.setPWM, pin, value));
+		}else
+		{
+			queuedPWM ~= tuple(pin, value);
+		}
+	}
+
 	void startCommunication()
 	{
 		workerId = spawn(&communicationLoop, filename, baudRate, parity);
+
+		for(pair; queuedPWM)
+		{
+			workerId.send(CommunicationMessage(CommunicationMessagePurpose.setPWM, pair[0], pair[1]));
+		}
 	}
 
 	void endCommunication()
@@ -118,6 +137,12 @@ class ArduinoDriver
 			serialPort.write([commandControlByte, 0x02, pin]);
 		}
 
+		void sendSetPWMCommand(ISerialPort serialPort, ubyte pin, ubyte value)
+		{
+			writeln("Sending setPWMCommand for pin "~to!string(pin)~" and value "~to!string(value));
+			serialPort.write([commandControlByte, 0x04, pin, value]);
+		}
+
 		void handleMessage(CommunicationMessage message)
 		{
 			with(CommunicationMessagePurpose)
@@ -134,6 +159,10 @@ class ArduinoDriver
 
 					case stopMonitoring:
 						sendStopMonitoringCommand(arduinoSerialPort, message.pin);
+						break;
+
+					case setPWM:
+						sendSetPWMCommand(arduinoSerialPort, message.pin, message.value);
 						break;
 
 					default:
@@ -306,6 +335,7 @@ private struct CommunicationMessage
 {
 	CommunicationMessagePurpose purpose;
 	ubyte pin;
+	ubyte value;
 
 	this(CommunicationMessagePurpose purpose)
 	in
@@ -320,12 +350,24 @@ private struct CommunicationMessage
 	this(CommunicationMessagePurpose purpose, ubyte pin)
 	in
 	{
-		assert(purpose != CommunicationMessagePurpose.write);
+		assert(purpose != CommunicationMessagePurpose.setPWM);
 	}
 	body
 	{
 		this.purpose = purpose;
 		this.pin = pin;
+	}
+
+	this(CommunicationMessagePurpose purpose, ubyte pin, ubyte value)
+	in
+	{
+		assert(purpose == CommunicationMessagePurpose.setPWM);
+	}
+	body
+	{
+		this.purpose = purpose;
+		this.pin = pin;
+		this.value = value;
 	}
 }
 
@@ -335,5 +377,5 @@ private enum CommunicationMessagePurpose
 	startMonitoring,
 	stopMonitoring,
 	read,
-	write
+	setPWM
 }

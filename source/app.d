@@ -12,25 +12,40 @@ void main()
 
 	void t1()
 	{
-	TestClass test = new TestClass(driver, 3);
-	TestClass test2 = new TestClass(driver, 0);
-	TestClass test4 = new TestClass(driver, 0);
+		TestClass test = new TestClass(driver, 3);
+		TestClass test2 = new TestClass(driver, 0);
+		TestClass test4 = new TestClass(driver, 0);
 
-    Thread.sleep(dur!"seconds"(1));
+	    Thread.sleep(dur!"seconds"(1));
 
-    TestClass test3 = new TestClass(driver, 2);
+	    TestClass test3 = new TestClass(driver, 2);
 
-	Thread.sleep(dur!"seconds"(1));
+		Thread.sleep(dur!"seconds"(1));
 
-	writeln("Removing listener on pin 3");
-	test.removeListener();
-	writeln("Removing one listener on pin 0");
-	test2.removeListener();
-
+		writeln("Removing listener on pin 3");
+		test.removeListener();
+		writeln("Removing one listener on pin 0");
+		test2.removeListener();
 	}
 
-	t1();
+	void t2()
+	{
+		TestClass test = new TestClass(driver, 0);
 
+		Thread.sleep(dur!"seconds"(2));
+
+		driver.setPWM(3, 50);
+
+		writeln("Pin 3 set to 0");
+
+		Thread.sleep(dur!"seconds"(2));
+
+		driver.setPWM(3, 200);
+
+		writeln("Pin 3 set to 255");
+	}
+
+	t2();
 
 	int readInt;
 
