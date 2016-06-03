@@ -8,6 +8,8 @@ import puppetteer.internal.listener_holder;
 
 import std.concurrency;
 import std.conv;
+import std.typecons;
+import std.exception;
 
 import core.time;
 import core.thread;
@@ -27,7 +29,7 @@ class ArduinoDriver
 	immutable BaudRate baudRate;
 
 	//This slice will be populated only if setPWM is called while workerId is still empty
-	private (immutable tuple(int, int))[] queuedPWM;
+	private immutable(Tuple!(ubyte, "pin", ubyte, "value"))[] queuedPWM;
 
 	private Tid workerId;
 
@@ -90,12 +92,12 @@ class ArduinoDriver
 
 	void setPWM(ubyte pin, ubyte value)
 	{
-		if(communicationOn)
+		if(workerId != workerId.init)
 		{
 			workerId.send(CommunicationMessage(CommunicationMessagePurpose.setPWM, pin, value));
 		}else
 		{
-			queuedPWM ~= tuple(pin, value);
+			queuedPWM ~= tuple!("pin", "value")(pin, value);
 		}
 	}
 
@@ -103,9 +105,10 @@ class ArduinoDriver
 	{
 		workerId = spawn(&communicationLoop, filename, baudRate, parity);
 
-		for(pair; queuedPWM)
+		foreach(pair; queuedPWM)
 		{
-			workerId.send(CommunicationMessage(CommunicationMessagePurpose.setPWM, pair[0], pair[1]));
+			writeln("Sending message to set PWM");
+			workerId.send(CommunicationMessage(CommunicationMessagePurpose.setPWM, pair.pin, pair.value));
 		}
 	}
 
@@ -263,7 +266,7 @@ class ArduinoDriver
 
 		enum portReadTimeoutMs = 200;
 		arduinoSerialPort = ISerialPort.getInstance(fileName, parity, baudRate, portReadTimeoutMs);
-		arduinoSerialPort.open();
+		enforce(arduinoSerialPort.open(), "Could not open "~fileName);
 		communicationOn = true;
 
 		//Arduino seems to need some time between port opening and communication start
@@ -314,7 +317,7 @@ class ArduinoDriver
 
 			if(readBytes !is null)
 			{
-				//writeln("Read bytes ", readBytes);
+				writeln("Read bytes ", readBytes);
 				handleReadBytes(readBytes);
 			}
 

@@ -1,13 +1,26 @@
 import std.stdio;
+import std.exception;
+import std.getopt;
+
 import core.thread;
 import core.time;
 import puppetteer.arduino_driver;
 import puppetteer.serial.BaudRate;
 import puppetteer.serial.Parity;
 
-void main()
+void main(string[] args)
 {
-	ArduinoDriver driver = new ArduinoDriver("/dev/ttyACM0", Parity.none, BaudRate.B9600);
+	string devFilename = "";
+
+	getopt(args,
+		"dev|d", &devFilename);
+
+	enforce(devFilename != "", "Please select an existing device using --dev [devicePath]");
+
+	writeln("Opening dev file "~devFilename);
+	ArduinoDriver driver = new ArduinoDriver(devFilename, Parity.none, BaudRate.B9600);
+	driver.setPWM(3, 255);
+	driver.setPWM(2, 0);
 	driver.startCommunication();
 
 	void t1()
