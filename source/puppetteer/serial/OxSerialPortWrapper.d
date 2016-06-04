@@ -33,7 +33,7 @@ class OxSerialPortWrapper : ISerialPort
 			final switch (baudRate)
 			{
 				case BaudRate.B9600:
-					return OnyxBaudRate.B9600;
+					return OnyxBaudRate.S9600;
 			}
 		}
 
