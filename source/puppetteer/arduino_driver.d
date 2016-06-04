@@ -16,7 +16,7 @@ import core.thread;
 
 import std.stdio;
 
-public alias readListenerDelegate = void delegate (ubyte, float) shared;
+public alias readListenerDelegate = void delegate (ubyte, float);
 
 class ArduinoDriver
 {
@@ -27,9 +27,6 @@ class ArduinoDriver
 	string filename;
 	immutable Parity parity;
 	immutable BaudRate baudRate;
-
-	//This slice will be populated only if setPWM is called while workerId is still empty
-	private immutable(Tuple!(ubyte, "pin", ubyte, "value"))[] queuedPWM;
 
 	private Tid workerId;
 
@@ -44,6 +41,7 @@ class ArduinoDriver
 	in
 	{
 		assert(listener !is null);
+		assert(communicationOn);
 	}
 	body
 	{
@@ -51,13 +49,10 @@ class ArduinoDriver
 		{
 			listenerHolders[pin] = new shared ListenerHolder(listener);
 
-			if(communicationOn)
-			{
-				writeln("Sending message to dynamically enable monitoring of pin "~to!string(pin));
-				workerId.send(CommunicationMessage(CommunicationMessagePurpose.startMonitoring, pin));
-			}
-
-		}else
+			writeln("Sending message to dynamically enable monitoring of pin "~to!string(pin));
+			workerId.send(CommunicationMessage(CommunicationMessagePurpose.startMonitoring, pin));
+		}
+		else
 		{
 			synchronized(listenerHolders[pin])
 			{
@@ -71,6 +66,7 @@ class ArduinoDriver
 	in
 	{
 		assert(listener !is null);
+		assert(communicationOn);
 		assert(pin in listenerHolders);
 	}
 	body
@@ -91,30 +87,45 @@ class ArduinoDriver
 	}
 
 	void setPWM(ubyte pin, ubyte value)
+	in
 	{
-		if(workerId != workerId.init)
-		{
-			workerId.send(CommunicationMessage(CommunicationMessagePurpose.setPWM, pin, value));
-		}else
-		{
-			queuedPWM ~= tuple!("pin", "value")(pin, value);
-		}
+		assert(communicationOn);
+		assert(workerId != Tid.init);
+	}
+	body
+	{
+		workerId.send(CommunicationMessage(CommunicationMessagePurpose.setPWM, pin, value));
 	}
 
-	void startCommunication()
+	bool startCommunication()
+	in
+	{
+		assert(!communicationOn);
+	}
+	body
 	{
 		workerId = spawn(&communicationLoop, filename, baudRate, parity);
 
-		foreach(pair; queuedPWM)
-		{
-			writeln("Sending message to set PWM");
-			workerId.send(CommunicationMessage(CommunicationMessagePurpose.setPWM, pair.pin, pair.value));
-		}
+		auto msg = receiveOnly!CommunicationEstablishedMessage();
+		return msg.success;
 	}
 
 	void endCommunication()
+	in
+	{
+		assert(communicationOn);
+	}
+	body
 	{
 		workerId.send(CommunicationMessage(CommunicationMessagePurpose.endCommunication));
+
+		receiveOnly!CommunicationEndedMessage();
+	}
+
+	@property
+	bool isCommunicationEstablished()
+	{
+		return communicationOn;
 	}
 
 	private void communicationLoop(string fileName, immutable BaudRate baudRate, immutable Parity parity) shared
@@ -136,7 +147,7 @@ class ArduinoDriver
 
 		void sendStopMonitoringCommand(ISerialPort serialPort, ubyte pin)
 		{
-            writeln("Sending stopMonitoringCommand for pin "~to!string(pin));
+      		writeln("Sending stopMonitoringCommand for pin "~to!string(pin));
 			serialPort.write([commandControlByte, 0x02, pin]);
 		}
 
@@ -171,7 +182,6 @@ class ArduinoDriver
 					default:
 						writeln("Unhandled message purpose "~to!string(message.purpose)~" received");
 				}
-
 			}
 		}
 
@@ -220,7 +230,7 @@ class ArduinoDriver
 					}
 				}else
 				{
-					writeln("No listeners registered for pin ",pin);
+					//writeln("No listeners registered for pin ",pin);
 				}
 			}
 
@@ -266,7 +276,12 @@ class ArduinoDriver
 
 		enum portReadTimeoutMs = 200;
 		arduinoSerialPort = ISerialPort.getInstance(fileName, parity, baudRate, portReadTimeoutMs);
-		enforce(arduinoSerialPort.open(), "Could not open "~fileName);
+		if(!arduinoSerialPort.open())
+		{
+			ownerTid.send(CommunicationEstablishedMessage(false));
+			return;
+		}
+
 		communicationOn = true;
 
 		//Arduino seems to need some time between port opening and communication start
@@ -280,6 +295,9 @@ class ArduinoDriver
 			enum ubyte[] puppetReadyCommand = [0x0, 0x0];
 			ubyte[] cache = [];
 			enum msBetweenChecks = 100;
+
+			int readCounter = 0;
+			enum readsUntilFailure = 20;
 
 			while(true)
 			{
@@ -299,11 +317,17 @@ class ArduinoDriver
 					}
 				}
 
+				if(++readCounter > readsUntilFailure)
+				{
+					ownerTid.send(CommunicationEstablishedMessage(false));
+					return;
+				}
+
 				Thread.sleep(dur!"msecs"(msBetweenChecks));
 			}
 		}
 
-		writeln("puppet is ready!");
+		ownerTid.send(CommunicationEstablishedMessage(true));
 
 		//Send startMonitoringCommands for already present listeners
 		foreach(pin; listenerHolders.byKey)
@@ -317,7 +341,7 @@ class ArduinoDriver
 
 			if(readBytes !is null)
 			{
-				writeln("Read bytes ", readBytes);
+				//writeln("Read bytes ", readBytes);
 				handleReadBytes(readBytes);
 			}
 
@@ -329,7 +353,22 @@ class ArduinoDriver
 		communicationOn = false;
 		arduinoSerialPort.close();
 
-		writeln("Ended communicationLoop");
+		ownerTid.send(CommunicationEndedMessage());
+	}
+
+	private struct CommunicationEstablishedMessage
+	{
+		bool success;
+
+		this(bool success)
+		{
+			this.success = success;
+		}
+	}
+
+	private struct CommunicationEndedMessage
+	{
+
 	}
 }
 
@@ -380,5 +419,5 @@ private enum CommunicationMessagePurpose
 	startMonitoring,
 	stopMonitoring,
 	read,
-	setPWM
+	setPWM,
 }
