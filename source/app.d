@@ -4,14 +4,17 @@ import std.getopt;
 import std.file;
 import std.concurrency;
 import std.conv;
+import std.datetime;
+import std.string;
+import std.format;
 
 import core.thread;
-import core.time : dur;
-
 
 import puppetteer.arduino_driver;
 import puppetteer.serial.BaudRate;
 import puppetteer.serial.Parity;
+
+__gshared StopWatch timer;
 
 void main(string[] args)
 {
@@ -75,13 +78,14 @@ void main(string[] args)
 		void addMonitor()
 		{
 			write("Which pin do you want to monitor? (-1 to cancel): ");
-			int input;
-			readf(" %s", &input);
+			int pinInput = -1;
+			string input = readln().chomp();
+			formattedRead(input, " %s", &pinInput);
 
-			if(input < 0)
+			if(pinInput < 0)
 				return;
 
-			ubyte pin = to!ubyte(input);
+			ubyte pin = to!ubyte(pinInput);
 
 			if(pin !in listeners)
 			{
@@ -96,13 +100,14 @@ void main(string[] args)
 		void removeMonitor()
 		{
 			write("Which pin do you want to stop monitoring? (-1 to cancel): ");
-			int input;
-			readf(" %s", &input);
+			int pinInput = -1;
+			string input = readln().chomp();
+			formattedRead(input, " %s", &pinInput);
 
-			if(input < 0)
+			if(pinInput < 0)
 				return;
 
-			ubyte pin = to!ubyte(input);
+			ubyte pin = to!ubyte(pinInput);
 
 			if(pin in listeners)
 			{
@@ -118,23 +123,24 @@ void main(string[] args)
 		{
 			write("Introduce pin and PWM value [pin-value] (-1 to cancel): ");
 
-			int pinInput;
+			int pinInput = -1;
 			ubyte pwmValue;
-			readf(" %s-%s", &pinInput, &pwmValue);
+			string input = readln().chomp();
+			formattedRead(input, " %s-%s", &pinInput, &pwmValue);
 
 			if(pinInput < 0)
 				return;
 
 			ubyte pin = to!ubyte(pinInput);
 
-			writeln("Setting PWM pin", pin, "to value", pwmValue);
+			writeln("Setting PWM pin ", pin, " to value ", pwmValue);
 			driver.setPWM(pin, pwmValue);
 		}
 
 		menu : while(true)
 		{
 			writeln("------");
-			writeln("Choose an option:");
+			writeln("Available options:");
 			with(Options)
 			{
 				printOption(start, "Start communication");
@@ -144,17 +150,23 @@ void main(string[] args)
 				printOption(pwm, "Set PWM output");
 				printOption(exit, "Exit");
 			}
+			writeln();
+			write("Select an option: ");
 
 			int option;
-
-			readf(" %s", &option);
+			string input = readln().chomp();
+			formattedRead(input, " %s", &option);
 
 			switch(option) with (Options)
 			{
 				case start:
 					writeln("Establishing communication with puppet...");
 					if(driver.startCommunication())
+					{
 						writeln("Communication established.");
+						timer.reset();
+						timer.start();
+					}
 					else
 						writeln("Could not establish communication with puppet.");
 					break;
@@ -162,6 +174,7 @@ void main(string[] args)
 				case stop:
 					driver.endCommunication();
 					writeln("Communication ended.");
+					timer.stop();
 					break;
 
 				case monitor:
@@ -212,7 +225,7 @@ class PinListener
 
 	void listenerMethod(ubyte pin, float value)
 	{
-		loggerTid.send(MainMessage("Pin "~to!string(pin)~" read "~to!string(value)));
+		loggerTid.send(MainMessage(to!string(timer.peek().msecs)~" => Pin "~to!string(pin)~" read "~to!string(value)));
 	}
 
 	void addListener()
