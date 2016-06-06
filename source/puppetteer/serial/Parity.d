@@ -1,4 +1,4 @@
-module puppetteer.serial.Parity;
+module puppeteer.serial.Parity;
 
 enum Parity
 {

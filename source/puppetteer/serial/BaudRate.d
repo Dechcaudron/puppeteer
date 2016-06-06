@@ -1,4 +1,4 @@
-module puppetteer.serial.BaudRate;
+module puppeteer.serial.BaudRate;
 
 enum BaudRate
 {

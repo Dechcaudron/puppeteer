@@ -10,16 +10,16 @@ import std.format;
 
 import core.thread;
 
-import puppetteer.arduino_driver;
-import puppetteer.serial.BaudRate;
-import puppetteer.serial.Parity;
+import puppeteer.arduino_driver;
+import puppeteer.serial.BaudRate;
+import puppeteer.serial.Parity;
 
 __gshared StopWatch timer;
 
 void main(string[] args)
 {
 	string devFilename = "";
-	string outFilename = "puppetteerOut.txt";
+	string outFilename = "puppeteerOut.txt";
 
 	getopt(args,
 		"dev|d", &devFilename,

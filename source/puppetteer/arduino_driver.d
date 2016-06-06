@@ -1,10 +1,10 @@
-module puppetteer.arduino_driver;
+module puppeteer.arduino_driver;
 
-import puppetteer.serial.ISerialPort;
-import puppetteer.serial.BaudRate;
-import puppetteer.serial.Parity;
+import puppeteer.serial.ISerialPort;
+import puppeteer.serial.BaudRate;
+import puppeteer.serial.Parity;
 
-import puppetteer.internal.listener_holder;
+import puppeteer.internal.listener_holder;
 
 import std.concurrency;
 import std.conv;
@@ -287,8 +287,8 @@ class ArduinoDriver
 		//Arduino seems to need some time between port opening and communication start
 		Thread.sleep(dur!"seconds"(1));
 
-		enum ubyte[] puppetteerReadyCommand = [0x0, 0x0];
-		arduinoSerialPort.write([commandControlByte] ~ puppetteerReadyCommand);
+		enum ubyte[] puppeteerReadyCommand = [0x0, 0x0];
+		arduinoSerialPort.write([commandControlByte] ~ puppeteerReadyCommand);
 
 		//Wait for the puppet to answer it is ready
 		{
