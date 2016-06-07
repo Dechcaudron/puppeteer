@@ -20,6 +20,7 @@ public alias readListenerDelegate = void delegate (ubyte, float);
 
 class ArduinoDriver
 {
+	//TODO: do I really have to manually synchronize access to this object?
 	protected shared ListenerHolder[ubyte] listenerHolders;
 
 	protected shared bool communicationOn;
@@ -119,6 +120,13 @@ class ArduinoDriver
 	{
 		workerId.send(CommunicationMessage(CommunicationMessagePurpose.endCommunication));
 
+		//Remove all listeners
+		foreach(key; listenerHolders.byKey())
+		{
+			synchronized(listenerHolders[key])
+				listenerHolders.remove(key);
+		}
+
 		receiveOnly!CommunicationEndedMessage();
 	}
 
@@ -155,6 +163,12 @@ class ArduinoDriver
 		{
 			writeln("Sending setPWMCommand for pin "~to!string(pin)~" and value "~to!string(value));
 			serialPort.write([commandControlByte, 0x04, pin, value]);
+		}
+
+		void sendPuppeteerClosedCommand(ISerialPort serialPort)
+		{
+			writeln("Sending puppeteerClosedCommand");
+			serialPort.write([commandControlByte, 0x99]);
 		}
 
 		void handleMessage(CommunicationMessage message)
@@ -282,8 +296,6 @@ class ArduinoDriver
 			return;
 		}
 
-		communicationOn = true;
-
 		//Arduino seems to need some time between port opening and communication start
 		Thread.sleep(dur!"seconds"(1));
 
@@ -297,7 +309,7 @@ class ArduinoDriver
 			enum msBetweenChecks = 100;
 
 			int readCounter = 0;
-			enum readsUntilFailure = 20;
+			enum readsUntilFailure = 30;
 
 			while(true)
 			{
@@ -327,6 +339,7 @@ class ArduinoDriver
 			}
 		}
 
+		communicationOn = true;
 		ownerTid.send(CommunicationEstablishedMessage(true));
 
 		//Send startMonitoringCommands for already present listeners
@@ -347,11 +360,14 @@ class ArduinoDriver
 
 			receiveTimeout(msecs(receiveTimeoutMs), &handleMessage);
 
-
 		}while(shouldContinue);
+
+		sendPuppeteerClosedCommand(arduinoSerialPort);
 
 		communicationOn = false;
 		arduinoSerialPort.close();
+
+
 
 		ownerTid.send(CommunicationEndedMessage());
 	}
