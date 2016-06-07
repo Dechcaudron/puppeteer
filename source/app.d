@@ -153,43 +153,65 @@ void main(string[] args)
 			writeln();
 			write("Select an option: ");
 
-			int option;
+			int option = -1;
 			string input = readln().chomp();
 			formattedRead(input, " %s", &option);
 
+			void printCommunicationRequired()
+			{
+				writeln("An established communication is required for this option.");
+			}
+
 			switch(option) with (Options)
 			{
-				case start:
-					writeln("Establishing communication with puppet...");
-					if(driver.startCommunication())
+				case start:	
+					if(!driver.isCommunicationEstablished)
 					{
-						writeln("Communication established.");
-						timer.reset();
-						timer.start();
+						writeln("Establishing communication with puppet...");
+						if(driver.startCommunication())
+						{
+							writeln("Communication established.");
+							timer.reset();
+							timer.start();
+						}
+						else
+							writeln("Could not establish communication with puppet.");
 					}
 					else
-						writeln("Could not establish communication with puppet.");
+						writeln("Communication is already established.");
+
 					break;
 
 				case stop:
-					driver.endCommunication();
-					writeln("Communication ended.");
-					timer.stop();
+					if(driver.isCommunicationEstablished)
+					{
+						driver.endCommunication();
+						writeln("Communication ended.");
+						timer.stop();
+					}
+					else
+						writeln("Communication has not been established yet.");
 					break;
 
 				case monitor:
 					if(driver.isCommunicationEstablished)
 						addMonitor();
+					else
+						printCommunicationRequired();
 					break;
 
 				case stopMonitor:
 					if(driver.isCommunicationEstablished)
 						removeMonitor();
+					else
+						printCommunicationRequired();
 					break;
 
 				case pwm:
 					if(driver.isCommunicationEstablished)
 						setPWM();
+					else
+						printCommunicationRequired();
 					break;
 
 				case exit:
@@ -202,7 +224,7 @@ void main(string[] args)
 					break menu;
 
 				default:
-					writeln(to!string(option)~" is not a valid option");
+					writeln("Please select a valid option.");
 			}
 		}
 	}
