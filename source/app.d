@@ -164,7 +164,7 @@ void main(string[] args)
 
 			switch(option) with (Options)
 			{
-				case start:	
+				case start:
 					if(!driver.isCommunicationEstablished)
 					{
 						writeln("Establishing communication with puppet...");
@@ -252,12 +252,12 @@ class PinListener
 
 	void addListener()
 	{
-		driver.addListener(pin, &listenerMethod);
+		driver.addPinListener(pin, &listenerMethod);
 	}
 
 	void removeListener()
 	{
-		driver.removeListener(pin, &listenerMethod);
+		driver.removePinListener(pin, &listenerMethod);
 	}
 }
 

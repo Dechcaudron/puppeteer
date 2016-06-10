@@ -4,24 +4,28 @@ import puppeteer.serial.ISerialPort;
 import puppeteer.serial.BaudRate;
 import puppeteer.serial.Parity;
 
-import puppeteer.internal.listener_holder;
+import puppeteer.internal.signal_wrapper;
 
 import std.concurrency;
 import std.conv;
 import std.typecons;
 import std.exception;
+import std.signals;
 
 import core.time;
 import core.thread;
 
 import std.stdio;
 
-public alias readListenerDelegate = void delegate (ubyte, float);
+public alias pinListenerDelegate = void delegate (ubyte, float);
+public alias intListenerDelegate = void delegate (int, int);
 
 class ArduinoDriver
 {
-	//TODO: do I really have to manually synchronize access to this object?
-	protected shared ListenerHolder[ubyte] listenerHolders;
+	alias PinSignalWrapper = SignalWrapper!(ubyte, float);
+
+	//Manually synchronized between both logical threads
+	protected __gshared PinSignalWrapper[ubyte] pinSignalWrappers;
 
 	protected shared bool communicationOn;
 
@@ -38,7 +42,7 @@ class ArduinoDriver
 		this.baudRate = baudRate;
 	}
 
-	void addListener(ubyte pin, readListenerDelegate listener)
+	void addPinListener(ubyte pin, pinListenerDelegate listener)
 	in
 	{
 		assert(listener !is null);
@@ -46,44 +50,51 @@ class ArduinoDriver
 	}
 	body
 	{
-		if(pin !in listenerHolders)
+		if(pin !in pinSignalWrappers)
 		{
-			listenerHolders[pin] = new shared ListenerHolder(listener);
+			PinSignalWrapper signalWrapper = new PinSignalWrapper;
+
+			pinSignalWrappers[pin] = signalWrapper;
+
+			//No need to synchronize this call since it is the first listener
+			signalWrapper.addListener(listener);
 
 			writeln("Sending message to dynamically enable monitoring of pin "~to!string(pin));
 			workerId.send(CommunicationMessage(CommunicationMessagePurpose.startMonitoring, pin));
 		}
 		else
 		{
-			synchronized(listenerHolders[pin])
+			PinSignalWrapper signalWrapper = pinSignalWrappers[pin];
+
+			synchronized(signalWrapper)
 			{
-				listenerHolders[pin].add(listener);
+				signalWrapper.addListener(listener);
 			}
 		}
 	}
 
 
-	void removeListener(ubyte pin, readListenerDelegate listener)
+	void removePinListener(ubyte pin, pinListenerDelegate listener)
 	in
 	{
 		assert(listener !is null);
 		assert(communicationOn);
-		assert(pin in listenerHolders);
+		assert(pin in pinSignalWrappers);
 	}
 	body
 	{
-		synchronized(listenerHolders[pin])
-		{
-			listenerHolders[pin].remove(listener);
+		PinSignalWrapper signalWrapper = pinSignalWrappers[pin];
 
-			/*If there are no remaining listeners for that pin,
-			remove the holder and command the puppet to stop monitoring
-			the specified pin*/
-			if(listenerHolders[pin].getListenersNumber == 0)
-			{
-				listenerHolders.remove(pin);
-				workerId.send(CommunicationMessage(CommunicationMessagePurpose.stopMonitoring, pin));
-			}
+		synchronized(signalWrapper)
+			signalWrapper.removeListener(listener);
+
+		/*If there are no remaining listeners for that pin,
+		remove the holder and command the puppet to stop monitoring
+		the specified pin*/
+		if(signalWrapper.listenersNumber == 0)
+		{
+			pinSignalWrappers.remove(pin);
+			workerId.send(CommunicationMessage(CommunicationMessagePurpose.stopMonitoring, pin));
 		}
 	}
 
@@ -121,10 +132,10 @@ class ArduinoDriver
 		workerId.send(CommunicationMessage(CommunicationMessagePurpose.endCommunication));
 
 		//Remove all listeners
-		foreach(key; listenerHolders.byKey())
+		foreach(pin; pinSignalWrappers.byKey())
 		{
-			synchronized(listenerHolders[key])
-				listenerHolders.remove(key);
+			synchronized(pinSignalWrappers[pin])
+				pinSignalWrappers.remove(pin);
 		}
 
 		receiveOnly!CommunicationEndedMessage();
@@ -226,7 +237,7 @@ class ArduinoDriver
 
 				ubyte pin = command[1];
 
-				if(pin in listenerHolders)
+				if(pin in pinSignalWrappers)
 				{
 					enum arduinoAnalogReadMax = 1023;
 					enum arduinoAnalogReference = 5;
@@ -235,16 +246,16 @@ class ArduinoDriver
 					ushort readValue = command[2] * ubytePossibleValues + command[3];
 					float realValue =  arduinoAnalogReference * to!float(readValue) / arduinoAnalogReadMax;
 
-					synchronized(listenerHolders[pin])
+					PinSignalWrapper signalWrapper = pinSignalWrappers[pin];
+
+					synchronized(signalWrapper)
 					{
-						foreach(listener; listenerHolders[pin].getListeners())
-						{
-							listener(pin, realValue);
-						}
+						signalWrapper.emit(pin, realValue);
 					}
+
 				}else
 				{
-					//writeln("No listeners registered for pin ",pin);
+					writeln("No listeners registered for pin ",pin);
 				}
 			}
 
@@ -341,12 +352,6 @@ class ArduinoDriver
 
 		communicationOn = true;
 		ownerTid.send(CommunicationEstablishedMessage(true));
-
-		//Send startMonitoringCommands for already present listeners
-		foreach(pin; listenerHolders.byKey)
-		{
-			sendStartMonitoringCommand(arduinoSerialPort, pin);
-		}
 
 		do
 		{
