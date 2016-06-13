@@ -16,6 +16,8 @@ import puppeteer.serial.Parity;
 
 __gshared StopWatch timer;
 
+alias Puppeteer = ArduinoDriver!(int);
+
 void main(string[] args)
 {
 	string devFilename = "";
@@ -28,7 +30,8 @@ void main(string[] args)
 	enforce(devFilename != "" && exists(devFilename), "Please select an existing device using --dev [devicePath]");
 
 	writeln("Opening dev file "~devFilename);
-	ArduinoDriver driver = new ArduinoDriver(devFilename, Parity.none, BaudRate.B9600);
+	Puppeteer driver = new Puppeteer(devFilename, Parity.none, BaudRate.B9600);
+	driver.addVariableListener!bool(0, null);
 
 	Tid loggerTid = spawn(
 		(string outFilename)
@@ -234,11 +237,11 @@ void main(string[] args)
 
 class PinListener
 {
-	ArduinoDriver driver;
+	Puppeteer driver;
 	ubyte pin;
 	Tid loggerTid;
 
-	this(ArduinoDriver driver, ubyte pin, Tid loggerTid)
+	this(Puppeteer driver, ubyte pin, Tid loggerTid)
 	{
 		this.driver = driver;
 		this.pin = pin;

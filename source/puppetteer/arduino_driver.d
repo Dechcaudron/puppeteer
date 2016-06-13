@@ -11,6 +11,7 @@ import std.conv;
 import std.typecons;
 import std.exception;
 import std.signals;
+import std.meta;
 
 import core.time;
 import core.thread;
@@ -18,14 +19,47 @@ import core.thread;
 import std.stdio;
 
 public alias pinListenerDelegate = void delegate (ubyte, float);
-public alias intListenerDelegate = void delegate (int, int);
 
-class ArduinoDriver
+private string unrollVariableSignalWrappers(VarTypes...)()
+{
+	string unroll = "";
+
+	foreach(varType; VarTypes)
+	{
+		unroll ~= generateVariableSignalWrappersType!varType() ~ " " ~ getVariableSignalWrappersName!varType() ~ ";\n";
+	}
+
+	return unroll;
+}
+
+private string generateVariableSignalWrappersType(VarType)()
+{
+	return "protected __gshared SignalWrapper!(int, " ~ VarType.stringof ~ ")[]";
+}
+unittest
+{
+	assert(generateVariableSignalWrappersType!int() == "protected __gshared SignalWrapper!(int, int)[]");
+	assert(generateVariableSignalWrappersType!float() == "protected __gshared SignalWrapper!(int, float)[]");
+	assert(generateVariableSignalWrappersType!byte() == "protected __gshared SignalWrapper!(int, byte)[]");
+}
+
+private string getVariableSignalWrappersName(VarType)()
+{
+	return VarType.stringof ~ "SignalWrappers";
+}
+unittest
+{
+	assert(getVariableSignalWrappersName!int() == "intSignalWrappers");
+}
+
+class ArduinoDriver(VarTypeMonitors...)
 {
 	alias PinSignalWrapper = SignalWrapper!(ubyte, float);
 
 	//Manually synchronized between both logical threads
 	protected __gshared PinSignalWrapper[ubyte] pinSignalWrappers;
+
+	mixin(unrollVariableSignalWrappers!VarTypeMonitors());
 
 	protected shared bool communicationOn;
 
@@ -34,6 +68,8 @@ class ArduinoDriver
 	immutable BaudRate baudRate;
 
 	private Tid workerId;
+
+	private alias hack(alias a) = a;
 
 	this(string filename, Parity parity = Parity.none, BaudRate baudRate = BaudRate.B9600)
 	{
@@ -46,10 +82,11 @@ class ArduinoDriver
 	in
 	{
 		assert(listener !is null);
-		assert(communicationOn);
 	}
 	body
 	{
+		enforce(communicationOn);
+
 		if(pin !in pinSignalWrappers)
 		{
 			PinSignalWrapper signalWrapper = new PinSignalWrapper;
@@ -78,11 +115,12 @@ class ArduinoDriver
 	in
 	{
 		assert(listener !is null);
-		assert(communicationOn);
-		assert(pin in pinSignalWrappers);
 	}
 	body
 	{
+		enforce(communicationOn);
+		enforce(pin in pinSignalWrappers);
+
 		PinSignalWrapper signalWrapper = pinSignalWrappers[pin];
 
 		synchronized(signalWrapper)
@@ -98,24 +136,69 @@ class ArduinoDriver
 		}
 	}
 
+	void addVariableListener(VarType)(int varIndex, void delegate(int, VarType) listener)
+	{
+		template isType(A){ enum isType = VarType is A;};
+		static assert(anySatisfy!(isType, VarTypeMonitors));
+
+		enforce(communicationOn);
+
+		alias typeSignalWrappers = hack!(mixin(getVariableSignalWrappersName!VarType));
+
+		if(varIndex in typeSignalWrappers)
+		{
+			auto signalWrapper = typeSignalWrappers[varIndex];
+
+			synchronized(signalWrapper)
+			{
+				signalWrapper.connect(listener);
+			}
+		}
+		else
+		{
+			auto wrapper = new SignalWrapper!(int, VarType);
+			wrapper.connect(listener);
+			typeSignalWrappers[varIndex] = wrapper;
+
+			//TODO: send message to communication thread
+		}
+	}
+
+	void removeVariableListener(VarType)(int varIndex, void delegate(int, VarType) listener)
+	{
+		enforce(communicationOn);
+
+		alias typeSignalWrappers = hack!(mixin(getVariableSignalWrappersName!VarType));
+
+		enforce(varIndex in typeSignalWrappers);
+
+		auto signalWrapper = typeSignalWrappers[varIndex];
+
+		synchronized(signalWrapper)
+			signalWrapper.remove(varIndex);
+
+		if(signalWrapper.listenersNumber == 0)
+		{
+			typeSignalWrappers.remove(signalWrapper);
+			//TODO: send message to communication thread
+		}
+	}
+
 	void setPWM(ubyte pin, ubyte value)
 	in
 	{
-		assert(communicationOn);
 		assert(workerId != Tid.init);
 	}
 	body
 	{
+		enforce(communicationOn);
 		workerId.send(CommunicationMessage(CommunicationMessagePurpose.setPWM, pin, value));
 	}
 
 	bool startCommunication()
-	in
 	{
-		assert(!communicationOn);
-	}
-	body
-	{
+		enforce(!communicationOn);
+
 		workerId = spawn(&communicationLoop, filename, baudRate, parity);
 
 		auto msg = receiveOnly!CommunicationEstablishedMessage();
@@ -123,12 +206,9 @@ class ArduinoDriver
 	}
 
 	void endCommunication()
-	in
 	{
-		assert(communicationOn);
-	}
-	body
-	{
+		enforce(communicationOn);
+
 		workerId.send(CommunicationMessage(CommunicationMessagePurpose.endCommunication));
 
 		//Remove all listeners
