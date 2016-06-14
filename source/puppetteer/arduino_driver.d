@@ -20,46 +20,18 @@ import std.stdio;
 
 public alias pinListenerDelegate = void delegate (ubyte, float);
 
-private string unrollVariableSignalWrappers(VarTypes...)()
-{
-	string unroll = "";
+private alias hack(alias a) = a;
 
-	foreach(varType; VarTypes)
-	{
-		unroll ~= generateVariableSignalWrappersType!varType() ~ " " ~ getVariableSignalWrappersName!varType() ~ ";\n";
-	}
-
-	return unroll;
-}
-
-private string generateVariableSignalWrappersType(VarType)()
-{
-	return "protected __gshared SignalWrapper!(int, " ~ VarType.stringof ~ ")[]";
-}
-unittest
-{
-	assert(generateVariableSignalWrappersType!int() == "protected __gshared SignalWrapper!(int, int)[]");
-	assert(generateVariableSignalWrappersType!float() == "protected __gshared SignalWrapper!(int, float)[]");
-	assert(generateVariableSignalWrappersType!byte() == "protected __gshared SignalWrapper!(int, byte)[]");
-}
-
-private string getVariableSignalWrappersName(VarType)()
-{
-	return VarType.stringof ~ "SignalWrappers";
-}
-unittest
-{
-	assert(getVariableSignalWrappersName!int() == "intSignalWrappers");
-}
-
-class ArduinoDriver(VarTypeMonitors...)
+class ArduinoDriver(VarMonitorTypes...)
+if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 {
 	alias PinSignalWrapper = SignalWrapper!(ubyte, float);
 
 	//Manually synchronized between both logical threads
 	protected __gshared PinSignalWrapper[ubyte] pinSignalWrappers;
+	protected __gshared mixin(unrollVariableSignalWrappers!VarMonitorTypes());
 
-	mixin(unrollVariableSignalWrappers!VarTypeMonitors());
+	enum canMonitor(T) = __traits(compiles, mixin(varMonitorSignalWrappersName!T));
 
 	protected shared bool communicationOn;
 
@@ -68,8 +40,6 @@ class ArduinoDriver(VarTypeMonitors...)
 	immutable BaudRate baudRate;
 
 	private Tid workerId;
-
-	private alias hack(alias a) = a;
 
 	this(string filename, Parity parity = Parity.none, BaudRate baudRate = BaudRate.B9600)
 	{
@@ -136,14 +106,11 @@ class ArduinoDriver(VarTypeMonitors...)
 		}
 	}
 
-	void addVariableListener(VarType)(int varIndex, void delegate(int, VarType) listener)
+	void addVariableListener(MonitorType)(ubyte varIndex, void delegate(ubyte, MonitorType) listener)
+	if(canMonitor!MonitorType)
 	{
-		template isType(A){ enum isType = VarType is A;};
-		static assert(anySatisfy!(isType, VarTypeMonitors));
-
 		enforce(communicationOn);
-
-		alias typeSignalWrappers = hack!(mixin(getVariableSignalWrappersName!VarType));
+		alias typeSignalWrappers = hack!(mixin(varMonitorSignalWrappersName!MonitorType));
 
 		if(varIndex in typeSignalWrappers)
 		{
@@ -151,24 +118,24 @@ class ArduinoDriver(VarTypeMonitors...)
 
 			synchronized(signalWrapper)
 			{
-				signalWrapper.connect(listener);
+				signalWrapper.addListener(listener);
 			}
 		}
 		else
 		{
-			auto wrapper = new SignalWrapper!(int, VarType);
-			wrapper.connect(listener);
+			auto wrapper = new SignalWrapper!(ubyte, MonitorType);
+			wrapper.addListener(listener);
 			typeSignalWrappers[varIndex] = wrapper;
 
-			//TODO: send message to communication thread
+			workerId.send(VarMonitorMessage(VarMonitorMessage.Action.start, varIndex, VarMonitorTypeCodeName!MonitorType));
 		}
 	}
 
-	void removeVariableListener(VarType)(int varIndex, void delegate(int, VarType) listener)
+	void removeVariableListener(MonitorType)(ubyte varIndex, void delegate(ubyte, MonitorType) listener)
+	if(canMonitor!MonitorType)
 	{
 		enforce(communicationOn);
-
-		alias typeSignalWrappers = hack!(mixin(getVariableSignalWrappersName!VarType));
+		alias typeSignalWrappers = hack!(mixin(varMonitorSignalWrappersName!MonitorType));
 
 		enforce(varIndex in typeSignalWrappers);
 
@@ -180,7 +147,7 @@ class ArduinoDriver(VarTypeMonitors...)
 		if(signalWrapper.listenersNumber == 0)
 		{
 			typeSignalWrappers.remove(signalWrapper);
-			//TODO: send message to communication thread
+			workerId.send(VarMonitorMessage(VarMonitorMessage.Action.stop, varIndex, VarMonitorTypeCodeName!MonitorType));
 		}
 	}
 
@@ -262,6 +229,18 @@ class ArduinoDriver(VarTypeMonitors...)
 			serialPort.write([commandControlByte, 0x99]);
 		}
 
+		void sendStartMonitoringVariableCmd(ISerialPort serialPort, VarMonitorTypeCode typeCode, byte varIndex)
+		{
+			writeln("Sending startMonitoringVariableCommand for type ", typeCode, "and index ", varIndex);
+			serialPort.write([commandControlByte, 0x05, typeCode, varIndex]);
+		}
+
+		void sendStopMonitoringVariableCmd(ISerialPort serialPort, VarMonitorTypeCode typeCode, byte varIndex)
+		{
+			writeln("Sending stopMonitoringVariableCommand for type ", typeCode, "and index ", varIndex);
+			serialPort.write([commandControlByte, 0x06, typeCode, varIndex]);
+		}
+
 		void handleMessage(CommunicationMessage message)
 		{
 			with(CommunicationMessagePurpose)
@@ -285,9 +264,15 @@ class ArduinoDriver(VarTypeMonitors...)
 						break;
 
 					default:
-						writeln("Unhandled message purpose "~to!string(message.purpose)~" received");
+						writeln("Unhandled message purpose ", message.purpose, " received");
 				}
 			}
+		}
+
+		void handleVarMonitorMessage(VarMonitorMessage message)
+		{
+			message.action == VarMonitorMessage.Action.start ? sendStartMonitoringVariableCmd(arduinoSerialPort, message.varTypeCode, message.varIndex) :
+																sendStopMonitoringVariableCmd(arduinoSerialPort, message.varTypeCode, message.varIndex);
 		}
 
 		void handleReadBytes(ubyte[] readBytes)
@@ -300,20 +285,21 @@ class ArduinoDriver(VarTypeMonitors...)
 		{
 			enum ReadCommands : ubyte
 			{
-				read = 0x1,
+				analogMonitor = 0x1,
+				varMonitor = 0x2,
 				error = 0xfe
 			}
 
-			void handleReadCommand(ubyte[] command)
+			void handleAnalogMonitorCommand(ubyte[] command)
 			in
 			{
 				assert(command !is null);
 				assert(command.length == 4);
-				assert(command[0] == ReadCommands.read);
+				assert(command[0] == ReadCommands.analogMonitor);
 			}
 			body
 			{
-				writeln("Handling readCommand ", command);
+				writeln("Handling analogMonitorCommand ", command);
 
 				ubyte pin = command[1];
 
@@ -339,6 +325,45 @@ class ArduinoDriver(VarTypeMonitors...)
 				}
 			}
 
+			void handleVarMonitorCommand(ubyte[] command)
+			in
+			{
+				assert(command !is null);
+				assert(command.length == 4);
+				assert(command[0] == ReadCommands.varMonitor;)
+			}
+			body
+			{
+				writeln("Handling varMonitorCommand");
+
+				void handleData(ubyte[] data)(VarType)
+				{
+
+				}
+
+				void delegate (ubyte[]) selectDelegate(ubyte typeCode)
+				{
+					switch(typeCode) with (VarMonitorTypeCode)
+					{
+						case int_t:
+							return handleData!int;
+
+						case float_t:
+							return handleData!float;
+							break;
+
+						default:
+							writeln("No delegate for varMonitorType of code ",type);
+							return null;
+					}
+				}
+
+				auto del = selectDelegate(command[1]);
+
+				if(del !is null)
+					del(command[2..$]);
+			}
+
 			static ubyte[] readBuffer = [];
 
 			readBuffer ~= readBytes;
@@ -361,11 +386,19 @@ class ArduinoDriver(VarTypeMonitors...)
 			//Try to make sense out of the readBytes
 			switch(readBuffer[1])
 			{
-				case ReadCommands.read:
+				case ReadCommands.analogMonitor:
 					if(readBuffer.length < 5)
 						return;
 
-					handleReadCommand(readBuffer[1..5]);
+					handleAnalogMonitorCommand(readBuffer[1..5]);
+					popReadBuffer(5);
+					break;
+
+				case ReadCommands.varMonitor:
+					if(readBuffer.length < 5)
+						return;
+
+					handleVarMonitorCommand(readBuffer[1..5]);
 					popReadBuffer(5);
 					break;
 
@@ -443,7 +476,7 @@ class ArduinoDriver(VarTypeMonitors...)
 				handleReadBytes(readBytes);
 			}
 
-			receiveTimeout(msecs(receiveTimeoutMs), &handleMessage);
+			receiveTimeout(msecs(receiveTimeoutMs), &handleMessage, &handleVarMonitorMessage);
 
 		}while(shouldContinue);
 
@@ -451,8 +484,6 @@ class ArduinoDriver(VarTypeMonitors...)
 
 		communicationOn = false;
 		arduinoSerialPort.close();
-
-
 
 		ownerTid.send(CommunicationEndedMessage());
 	}
@@ -471,9 +502,60 @@ class ArduinoDriver(VarTypeMonitors...)
 	{
 
 	}
+
+	private struct VarMonitorMessage
+	{
+		enum Action
+		{
+			start,
+			stop
+		}
+
+		private Action action;
+		private ubyte varIndex;
+		private VarMonitorTypeCode varTypeCode;
+
+		this(Action action, ubyte varIndex, VarMonitorTypeCode varTypeCode)
+		{
+			this.action = action;
+			this.varIndex = varIndex;
+			this.varTypeCode = varTypeCode;
+		}
+	}
+}
+unittest
+{
+	assert(__traits(compiles, ArduinoDriver!int));
+	assert(__traits(compiles, ArduinoDriver!float));
+	assert(__traits(compiles, ArduinoDriver!(int, float)));
+	assert(!__traits(compiles, ArduinoDriver!(int, void)));
 }
 
+private enum VarMonitorTypeCode : byte
+{
+	int_t = 0x0,
+	float_t = 0x01
+}
 
+enum isVarMonitorTypeSupported(VarType) = __traits(compiles, VarMonitorTypeCodeName!VarType);
+unittest
+{
+	assert(isVarMonitorTypeSupported!int);
+	assert(isVarMonitorTypeSupported!float);
+	assert(!isVarMonitorTypeSupported!void);
+}
+
+template VarMonitorTypeCodeName(VarType)
+{
+	alias VarMonitorTypeCodeName = hack!(mixin(VarMonitorTypeCode.stringof ~ "." ~ VarType.stringof ~ "_t"));
+}
+unittest
+{
+	assert(VarMonitorTypeCodeName!int == VarMonitorTypeCode.int_t);
+	assert(VarMonitorTypeCodeName!float == VarMonitorTypeCode.float_t);
+}
+
+//TODO: split into multiple messages, this struct is horrible
 private struct CommunicationMessage
 {
 	CommunicationMessagePurpose purpose;
@@ -521,4 +603,32 @@ private enum CommunicationMessagePurpose
 	stopMonitoring,
 	read,
 	setPWM,
+}
+
+private string unrollVariableSignalWrappers(VarTypes...)()
+{
+	string unroll = "";
+
+	foreach(varType; VarTypes)
+	{
+		unroll ~= varMonitorSignalWrappersType!varType ~ " " ~ varMonitorSignalWrappersName!varType ~ ";\n";
+	}
+
+	return unroll;
+}
+
+
+enum varMonitorSignalWrappersType(VarType) = "SignalWrapper!(ubyte, " ~ VarType.stringof ~ ")[ubyte]";
+unittest
+{
+	assert(varMonitorSignalWrappersType!int == "SignalWrapper!(ubyte, int)[ubyte]");
+	assert(varMonitorSignalWrappersType!float == "SignalWrapper!(ubyte, float)[ubyte]");
+	assert(varMonitorSignalWrappersType!byte == "SignalWrapper!(ubyte, byte)[ubyte]");
+}
+
+
+enum varMonitorSignalWrappersName(VarType) = VarType.stringof ~ "SignalWrappers";
+unittest
+{
+	assert(varMonitorSignalWrappersName!int == "intSignalWrappers");
 }
