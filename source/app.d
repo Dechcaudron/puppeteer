@@ -10,13 +10,11 @@ import std.format;
 
 import core.thread;
 
-import puppeteer.arduino_driver;
+import puppeteer.puppeteer;
 import puppeteer.serial.BaudRate;
 import puppeteer.serial.Parity;
 
 __gshared StopWatch timer;
-
-alias Puppeteer = ArduinoDriver!(short);
 
 void main(string[] args)
 {
@@ -30,7 +28,7 @@ void main(string[] args)
 	enforce(devFilename != "" && exists(devFilename), "Please select an existing device using --dev [devicePath]");
 
 	writeln("Opening dev file "~devFilename);
-	Puppeteer driver = new Puppeteer(devFilename, Parity.none, BaudRate.B9600);
+	auto puppetteer = new Puppetteer!short(devFilename, Parity.none, BaudRate.B9600);
 
 	Tid loggerTid = spawn(
 		(string outFilename)
@@ -77,7 +75,7 @@ void main(string[] args)
 			writeln(to!string(int(option)) ~ " - " ~ optionMsg);
 		}
 
-		PuppetListener listener = new PuppetListener(driver, loggerTid);
+		PuppetListener listener = new PuppetListener(puppetteer, loggerTid);
 
 		void addPinMonitor()
 		{
@@ -158,7 +156,7 @@ void main(string[] args)
 			ubyte pin = to!ubyte(pinInput);
 
 			writeln("Setting PWM pin ", pin, " to value ", pwmValue);
-			driver.setPWM(pin, pwmValue);
+			puppetteer.setPWM(pin, pwmValue);
 		}
 
 		menu : while(true)
@@ -191,10 +189,10 @@ void main(string[] args)
 			switch(option) with (Options)
 			{
 				case start:
-					if(!driver.isCommunicationEstablished)
+					if(!puppetteer.isCommunicationEstablished)
 					{
 						writeln("Establishing communication with puppet...");
-						if(driver.startCommunication())
+						if(puppetteer.startCommunication())
 						{
 							writeln("Communication established.");
 							timer.reset();
@@ -209,9 +207,9 @@ void main(string[] args)
 					break;
 
 				case stop:
-					if(driver.isCommunicationEstablished)
+					if(puppetteer.isCommunicationEstablished)
 					{
-						driver.endCommunication();
+						puppetteer.endCommunication();
 						writeln("Communication ended.");
 						timer.stop();
 					}
@@ -220,45 +218,45 @@ void main(string[] args)
 					break;
 
 				case startPinMonitor:
-					if(driver.isCommunicationEstablished)
+					if(puppetteer.isCommunicationEstablished)
 						addPinMonitor();
 					else
 						printCommunicationRequired();
 					break;
 
 				case stopPinMonitor:
-					if(driver.isCommunicationEstablished)
+					if(puppetteer.isCommunicationEstablished)
 						removePinMonitor();
 					else
 						printCommunicationRequired();
 					break;
 
 				case startVarMonitor:
-					if(driver.isCommunicationEstablished)
+					if(puppetteer.isCommunicationEstablished)
 						addVarMonitor();
 					else
 						printCommunicationRequired();
 					break;
 
 				case stopVarMonitor:
-					if(driver.isCommunicationEstablished)
+					if(puppetteer.isCommunicationEstablished)
 						removeVarMonitor();
 					else
 						printCommunicationRequired();
 					break;
 
 				case pwm:
-					if(driver.isCommunicationEstablished)
+					if(puppetteer.isCommunicationEstablished)
 						setPWM();
 					else
 						printCommunicationRequired();
 					break;
 
 				case exit:
-					if(driver.isCommunicationEstablished)
+					if(puppetteer.isCommunicationEstablished)
 					{
 						writeln("Finishing communication with puppet...");
-						driver.endCommunication();
+						puppetteer.endCommunication();
 					}
 					loggerTid.send(MainMessage("END"));
 					break menu;
@@ -274,12 +272,12 @@ void main(string[] args)
 
 class PuppetListener
 {
-	Puppeteer driver;
+	Puppetteer!short puppetteer;
 	Tid loggerTid;
 
-	this(Puppeteer driver, Tid loggerTid)
+	this(Puppetteer!short puppetteer, Tid loggerTid)
 	{
-		this.driver = driver;
+		this.puppetteer = puppetteer;
 		this.loggerTid = loggerTid;
 	}
 
@@ -295,22 +293,22 @@ class PuppetListener
 
 	void addPinListener(ubyte pin)
 	{
-		driver.addPinListener(pin, &pinListenerMethod);
+		puppetteer.addPinListener(pin, &pinListenerMethod);
 	}
 
 	void removePinListener(ubyte pin)
 	{
-		driver.removePinListener(pin, &pinListenerMethod);
+		puppetteer.removePinListener(pin, &pinListenerMethod);
 	}
 
 	void addVarListener(VarType)(ubyte varIndex)
 	{
-		driver.addVariableListener(varIndex, &varListenerMethod!VarType);
+		puppetteer.addVariableListener(varIndex, &varListenerMethod!VarType);
 	}
 
 	void removeVarListener(VarType)(ubyte varIndex)
 	{
-		driver.removeVariableListener(varIndex, &varListenerMethod!VarType);
+		puppetteer.removeVariableListener(varIndex, &varListenerMethod!VarType);
 	}
 }
 

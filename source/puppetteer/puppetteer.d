@@ -1,10 +1,10 @@
-module puppeteer.arduino_driver;
+module puppeteer.puppeteer;
 
 import puppeteer.serial.ISerialPort;
 import puppeteer.serial.BaudRate;
 import puppeteer.serial.Parity;
 
-import puppeteer.internal.signal_wrapper;
+import puppeteer.signal_wrapper;
 
 import std.concurrency;
 import std.conv;
@@ -22,7 +22,7 @@ public alias pinListenerDelegate = void delegate (ubyte, float);
 
 private alias hack(alias a) = a;
 
-class ArduinoDriver(VarMonitorTypes...)
+class Puppetteer(VarMonitorTypes...)
 if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 {
 	alias PinSignalWrapper = SignalWrapper!(ubyte, float);
@@ -354,7 +354,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 						}
 					}
 
-					VarType decodeData(VarType : short)(ubyte[] data)
+					pure VarType decodeData(VarType : short)(ubyte[] data)
 					{
 						enum ubytePossibleValues = 256;
 						return to!short(data[0] * ubytePossibleValues + data[1]);
@@ -544,30 +544,10 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 }
 unittest
 {
-	assert(__traits(compiles, ArduinoDriver!short));
-	assert(!__traits(compiles, ArduinoDriver!float));
-	assert(!__traits(compiles, ArduinoDriver!(short, float)));
-	assert(!__traits(compiles, ArduinoDriver!(short, void)));
-}
-
-private enum VarMonitorTypeCode : byte
-{
-	short_t = 0x0,
-}
-
-enum isVarMonitorTypeSupported(VarType) = __traits(compiles, varMonitorTypeCode!VarType);
-unittest
-{
-	assert(isVarMonitorTypeSupported!short);
-	assert(!isVarMonitorTypeSupported!float);
-	assert(!isVarMonitorTypeSupported!void);
-}
-
-
-alias varMonitorTypeCode(VarType) = hack!(mixin(VarMonitorTypeCode.stringof ~ "." ~ VarType.stringof ~ "_t"));
-unittest
-{
-	assert(varMonitorTypeCode!short == VarMonitorTypeCode.short_t);
+	assert(__traits(compiles, Puppetteer!short));
+	assert(!__traits(compiles, Puppetteer!float));
+	assert(!__traits(compiles, Puppetteer!(short, float)));
+	assert(!__traits(compiles, Puppetteer!(short, void)));
 }
 
 //TODO: split into multiple messages, this struct is horrible
@@ -620,7 +600,27 @@ private enum CommunicationMessagePurpose
 	setPWM,
 }
 
-private string unrollVariableSignalWrappers(VarTypes...)()
+private enum VarMonitorTypeCode : byte
+{
+	short_t = 0x0,
+}
+
+private enum isVarMonitorTypeSupported(VarType) = __traits(compiles, varMonitorTypeCode!VarType);
+unittest
+{
+	assert(isVarMonitorTypeSupported!short);
+	assert(!isVarMonitorTypeSupported!float);
+	assert(!isVarMonitorTypeSupported!void);
+}
+
+
+private alias varMonitorTypeCode(VarType) = hack!(mixin(VarMonitorTypeCode.stringof ~ "." ~ VarType.stringof ~ "_t"));
+unittest
+{
+	assert(varMonitorTypeCode!short == VarMonitorTypeCode.short_t);
+}
+
+private pure string unrollVariableSignalWrappers(VarTypes...)()
 {
 	string unroll = "";
 
@@ -633,7 +633,7 @@ private string unrollVariableSignalWrappers(VarTypes...)()
 }
 
 
-enum varMonitorSignalWrappersType(VarType) = "SignalWrapper!(ubyte, " ~ VarType.stringof ~ ")[ubyte]";
+private pure enum varMonitorSignalWrappersType(VarType) = "SignalWrapper!(ubyte, " ~ VarType.stringof ~ ")[ubyte]";
 unittest
 {
 	assert(varMonitorSignalWrappersType!int == "SignalWrapper!(ubyte, int)[ubyte]");
@@ -642,7 +642,7 @@ unittest
 }
 
 
-enum varMonitorSignalWrappersName(VarType) = VarType.stringof ~ "SignalWrappers";
+private pure enum varMonitorSignalWrappersName(VarType) = VarType.stringof ~ "SignalWrappers";
 unittest
 {
 	assert(varMonitorSignalWrappersName!int == "intSignalWrappers");
