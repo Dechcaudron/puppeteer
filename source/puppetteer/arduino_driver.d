@@ -96,9 +96,6 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 		synchronized(signalWrapper)
 			signalWrapper.removeListener(listener);
 
-		/*If there are no remaining listeners for that pin,
-		remove the holder and command the puppet to stop monitoring
-		the specified pin*/
 		if(signalWrapper.listenersNumber == 0)
 		{
 			pinSignalWrappers.remove(pin);
@@ -127,7 +124,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 			wrapper.addListener(listener);
 			typeSignalWrappers[varIndex] = wrapper;
 
-			workerId.send(VarMonitorMessage(VarMonitorMessage.Action.start, varIndex, VarMonitorTypeCodeName!MonitorType));
+			workerId.send(VarMonitorMessage(VarMonitorMessage.Action.start, varIndex, varMonitorTypeCode!MonitorType));
 		}
 	}
 
@@ -142,12 +139,12 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 		auto signalWrapper = typeSignalWrappers[varIndex];
 
 		synchronized(signalWrapper)
-			signalWrapper.remove(varIndex);
+			signalWrapper.removeListener(listener);
 
 		if(signalWrapper.listenersNumber == 0)
 		{
-			typeSignalWrappers.remove(signalWrapper);
-			workerId.send(VarMonitorMessage(VarMonitorMessage.Action.stop, varIndex, VarMonitorTypeCodeName!MonitorType));
+			typeSignalWrappers.remove(varIndex);
+			workerId.send(VarMonitorMessage(VarMonitorMessage.Action.stop, varIndex, varMonitorTypeCode!MonitorType));
 		}
 	}
 
@@ -231,13 +228,13 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
 		void sendStartMonitoringVariableCmd(ISerialPort serialPort, VarMonitorTypeCode typeCode, byte varIndex)
 		{
-			writeln("Sending startMonitoringVariableCommand for type ", typeCode, "and index ", varIndex);
+			writeln("Sending startMonitoringVariableCommand for type ", typeCode, " and index ", varIndex);
 			serialPort.write([commandControlByte, 0x05, typeCode, varIndex]);
 		}
 
 		void sendStopMonitoringVariableCmd(ISerialPort serialPort, VarMonitorTypeCode typeCode, byte varIndex)
 		{
-			writeln("Sending stopMonitoringVariableCommand for type ", typeCode, "and index ", varIndex);
+			writeln("Sending stopMonitoringVariableCommand for type ", typeCode, " and index ", varIndex);
 			serialPort.write([commandControlByte, 0x06, typeCode, varIndex]);
 		}
 
@@ -329,39 +326,61 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 			in
 			{
 				assert(command !is null);
-				assert(command.length == 4);
-				assert(command[0] == ReadCommands.varMonitor;)
+				assert(command.length == 5);
+				assert(command[0] == ReadCommands.varMonitor);
 			}
 			body
 			{
-				writeln("Handling varMonitorCommand");
+				writeln("Handling varMonitorCommand ", command);
 
-				void handleData(ubyte[] data)(VarType)
+				void handleData(VarType)(ubyte varIndex, ubyte[] data)
 				{
+					void emitData(VarType)(ubyte varIndex, VarType data)
+					{
+						alias varTypeSignalWrappers = hack!(mixin(varMonitorSignalWrappersName!VarType));
 
+						if(varIndex in varTypeSignalWrappers)
+						{
+							auto signalWrapper = varTypeSignalWrappers[varIndex];
+
+							synchronized(signalWrapper)
+							{
+								signalWrapper.emit(varIndex, data);
+							}
+						}
+						else
+						{
+							writeln("SignalWrapper for type ", VarType.stringof, "and varIndex ", varIndex, "was no longer in its SignalWrapper assoc array. Skipping signal emission.");
+						}
+					}
+
+					VarType decodeData(VarType : short)(ubyte[] data)
+					{
+						enum ubytePossibleValues = 256;
+						return to!short(data[0] * ubytePossibleValues + data[1]);
+					}
+
+					emitData(varIndex, decodeData!VarType(data));
 				}
 
-				void delegate (ubyte[]) selectDelegate(ubyte typeCode)
+				void delegate (ubyte, ubyte[]) selectDelegate(VarMonitorTypeCode typeCode)
 				{
-					switch(typeCode) with (VarMonitorTypeCode)
+					//TODO: this could be generated with a mixin
+					final switch(typeCode) with (VarMonitorTypeCode)
 					{
-						case int_t:
-							return handleData!int;
-
-						case float_t:
-							return handleData!float;
-							break;
-
-						default:
-							writeln("No delegate for varMonitorType of code ",type);
-							return null;
+						case short_t:
+							return &handleData!short;
 					}
 				}
 
-				auto del = selectDelegate(command[1]);
-
-				if(del !is null)
-					del(command[2..$]);
+				try
+				{
+					auto handler = selectDelegate(to!VarMonitorTypeCode(command[1]));
+					handler(command[2], command[3..$]);
+				}catch(ConvException e)
+				{
+					writeln("Received invalid varMonitor type: ",e);
+				}
 			}
 
 			static ubyte[] readBuffer = [];
@@ -395,11 +414,11 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 					break;
 
 				case ReadCommands.varMonitor:
-					if(readBuffer.length < 5)
+					if(readBuffer.length < 6)
 						return;
 
-					handleVarMonitorCommand(readBuffer[1..5]);
-					popReadBuffer(5);
+					handleVarMonitorCommand(readBuffer[1..6]);
+					popReadBuffer(6);
 					break;
 
 				case ReadCommands.error:
@@ -442,7 +461,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 				if(readBytes !is null)
 				{
 					cache ~= readBytes;
-					writeln("cache is currently ", cache);
+					writeln("handshake cache is currently ", cache);
 
 					if(cache.length == 3)
 					{
@@ -525,34 +544,30 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 }
 unittest
 {
-	assert(__traits(compiles, ArduinoDriver!int));
-	assert(__traits(compiles, ArduinoDriver!float));
-	assert(__traits(compiles, ArduinoDriver!(int, float)));
-	assert(!__traits(compiles, ArduinoDriver!(int, void)));
+	assert(__traits(compiles, ArduinoDriver!short));
+	assert(!__traits(compiles, ArduinoDriver!float));
+	assert(!__traits(compiles, ArduinoDriver!(short, float)));
+	assert(!__traits(compiles, ArduinoDriver!(short, void)));
 }
 
 private enum VarMonitorTypeCode : byte
 {
-	int_t = 0x0,
-	float_t = 0x01
+	short_t = 0x0,
 }
 
-enum isVarMonitorTypeSupported(VarType) = __traits(compiles, VarMonitorTypeCodeName!VarType);
+enum isVarMonitorTypeSupported(VarType) = __traits(compiles, varMonitorTypeCode!VarType);
 unittest
 {
-	assert(isVarMonitorTypeSupported!int);
-	assert(isVarMonitorTypeSupported!float);
+	assert(isVarMonitorTypeSupported!short);
+	assert(!isVarMonitorTypeSupported!float);
 	assert(!isVarMonitorTypeSupported!void);
 }
 
-template VarMonitorTypeCodeName(VarType)
-{
-	alias VarMonitorTypeCodeName = hack!(mixin(VarMonitorTypeCode.stringof ~ "." ~ VarType.stringof ~ "_t"));
-}
+
+alias varMonitorTypeCode(VarType) = hack!(mixin(VarMonitorTypeCode.stringof ~ "." ~ VarType.stringof ~ "_t"));
 unittest
 {
-	assert(VarMonitorTypeCodeName!int == VarMonitorTypeCode.int_t);
-	assert(VarMonitorTypeCodeName!float == VarMonitorTypeCode.float_t);
+	assert(varMonitorTypeCode!short == VarMonitorTypeCode.short_t);
 }
 
 //TODO: split into multiple messages, this struct is horrible

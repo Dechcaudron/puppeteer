@@ -16,7 +16,7 @@ import puppeteer.serial.Parity;
 
 __gshared StopWatch timer;
 
-alias Puppeteer = ArduinoDriver!(int);
+alias Puppeteer = ArduinoDriver!(short);
 
 void main(string[] args)
 {
@@ -31,7 +31,6 @@ void main(string[] args)
 
 	writeln("Opening dev file "~devFilename);
 	Puppeteer driver = new Puppeteer(devFilename, Parity.none, BaudRate.B9600);
-	driver.addVariableListener!bool(0, null);
 
 	Tid loggerTid = spawn(
 		(string outFilename)
@@ -65,8 +64,10 @@ void main(string[] args)
 		{
 			start,
 			stop,
-			monitor,
-			stopMonitor,
+			startPinMonitor,
+			stopPinMonitor,
+			startVarMonitor,
+			stopVarMonitor,
 			pwm,
 			exit
 		}
@@ -76,9 +77,9 @@ void main(string[] args)
 			writeln(to!string(int(option)) ~ " - " ~ optionMsg);
 		}
 
-		PinListener[int] listeners;
+		PuppetListener listener = new PuppetListener(driver, loggerTid);
 
-		void addMonitor()
+		void addPinMonitor()
 		{
 			write("Which pin do you want to monitor? (-1 to cancel): ");
 			int pinInput = -1;
@@ -90,17 +91,11 @@ void main(string[] args)
 
 			ubyte pin = to!ubyte(pinInput);
 
-			if(pin !in listeners)
-			{
-				listeners[pin] = new PinListener(driver, pin, loggerTid);
-				listeners[pin].addListener();
-				writeln("Monitoring pin ",pin);
-			}
-			else
-				writeln("That pin is already being monitored.");
+			listener.addPinListener(pin);
+			writeln("Monitoring pin ",pin);
 		}
 
-		void removeMonitor()
+		void removePinMonitor()
 		{
 			write("Which pin do you want to stop monitoring? (-1 to cancel): ");
 			int pinInput = -1;
@@ -112,14 +107,40 @@ void main(string[] args)
 
 			ubyte pin = to!ubyte(pinInput);
 
-			if(pin in listeners)
-			{
-				listeners[pin].removeListener();
-				listeners.remove(pin);
-				writeln("Stopped monitoring pin ",pin);
-			}
-			else
-				writeln("That pin is not being monitored.");
+			listener.removePinListener(pin);
+			writeln("Stopped monitoring pin ",pin);
+		}
+
+		void addVarMonitor()
+		{
+			write("Which var do you want to monitor? (-1 to cancel): ");
+			int varInput = -1;
+			string input = readln().chomp();
+			formattedRead(input, " %s", &varInput);
+
+			if(varInput < 0)
+				return;
+
+			ubyte index = to!ubyte(varInput);
+
+			listener.addVarListener!short(index);
+			writeln("Monitoring variable ", index);
+		}
+
+		void removeVarMonitor()
+		{
+			write("Which var do you want to stop monitoring? (-1 to cancel): ");
+			int varInput = -1;
+			string input = readln().chomp();
+			formattedRead(input, " %s", &varInput);
+
+			if(varInput < 0)
+				return;
+
+			ubyte index = to!ubyte(varInput);
+
+			listener.removeVarListener!short(index);
+			writeln("Stopping monitoring variable ", index);
 		}
 
 		void setPWM()
@@ -148,8 +169,10 @@ void main(string[] args)
 			{
 				printOption(start, "Start communication");
 				printOption(stop, "Stop communication");
-				printOption(monitor, "Monitor analog input");
-				printOption(stopMonitor, "Stop monitoring analog input");
+				printOption(startPinMonitor, "Monitor analog input");
+				printOption(stopPinMonitor, "Stop monitoring analog input");
+				printOption(startVarMonitor, "Monitor internal variable");
+				printOption(stopVarMonitor, "Stop monitoring internal variable");
 				printOption(pwm, "Set PWM output");
 				printOption(exit, "Exit");
 			}
@@ -196,16 +219,30 @@ void main(string[] args)
 						writeln("Communication has not been established yet.");
 					break;
 
-				case monitor:
+				case startPinMonitor:
 					if(driver.isCommunicationEstablished)
-						addMonitor();
+						addPinMonitor();
 					else
 						printCommunicationRequired();
 					break;
 
-				case stopMonitor:
+				case stopPinMonitor:
 					if(driver.isCommunicationEstablished)
-						removeMonitor();
+						removePinMonitor();
+					else
+						printCommunicationRequired();
+					break;
+
+				case startVarMonitor:
+					if(driver.isCommunicationEstablished)
+						addVarMonitor();
+					else
+						printCommunicationRequired();
+					break;
+
+				case stopVarMonitor:
+					if(driver.isCommunicationEstablished)
+						removeVarMonitor();
 					else
 						printCommunicationRequired();
 					break;
@@ -235,32 +272,45 @@ void main(string[] args)
 	showMenu();
 }
 
-class PinListener
+class PuppetListener
 {
 	Puppeteer driver;
-	ubyte pin;
 	Tid loggerTid;
 
-	this(Puppeteer driver, ubyte pin, Tid loggerTid)
+	this(Puppeteer driver, Tid loggerTid)
 	{
 		this.driver = driver;
-		this.pin = pin;
 		this.loggerTid = loggerTid;
 	}
 
-	void listenerMethod(ubyte pin, float value)
+	void pinListenerMethod(ubyte pin, float value)
 	{
 		loggerTid.send(MainMessage(to!string(timer.peek().msecs)~" => Pin "~to!string(pin)~" read "~to!string(value)));
 	}
 
-	void addListener()
+	void varListenerMethod(VarType)(ubyte varIndex, VarType value)
 	{
-		driver.addPinListener(pin, &listenerMethod);
+		loggerTid.send(MainMessage(to!string(timer.peek().msecs)~" => Var "~to!string(varIndex)~ " of type " ~ VarType.stringof ~ " read "~to!string(value)));
 	}
 
-	void removeListener()
+	void addPinListener(ubyte pin)
 	{
-		driver.removePinListener(pin, &listenerMethod);
+		driver.addPinListener(pin, &pinListenerMethod);
+	}
+
+	void removePinListener(ubyte pin)
+	{
+		driver.removePinListener(pin, &pinListenerMethod);
+	}
+
+	void addVarListener(VarType)(ubyte varIndex)
+	{
+		driver.addVariableListener(varIndex, &varListenerMethod!VarType);
+	}
+
+	void removeVarListener(VarType)(ubyte varIndex)
+	{
+		driver.removeVariableListener(varIndex, &varListenerMethod!VarType);
 	}
 }
 

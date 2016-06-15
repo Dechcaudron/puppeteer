@@ -1,7 +1,9 @@
 module puppeteer.internal.signal_wrapper;
 
+import std.stdio;
 import std.signals;
 
+//TODO: life would be so much easier if this class could be shared :)
 class SignalWrapper(T1...)
 {
     private mixin Signal!T1 signal;
