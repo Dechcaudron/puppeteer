@@ -6,30 +6,31 @@ import puppeteer.serial.Parity;
 
 import puppeteer.signal_wrapper;
 
+import std.stdio;
 import std.concurrency;
 import std.conv;
 import std.typecons;
 import std.exception;
 import std.signals;
 import std.meta;
+import std.datetime;
 
 import core.time;
 import core.thread;
 
-import std.stdio;
 
-public alias pinListenerDelegate = void delegate (ubyte, float);
+public alias pinListenerDelegate = void delegate (ubyte, float, long) shared;
 
 private alias hack(alias a) = a;
 
 class Puppetteer(VarMonitorTypes...)
 if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 {
-	alias PinSignalWrapper = SignalWrapper!(ubyte, float);
+	alias PinSignalWrapper = SignalWrapper!(ubyte, float, long);
 
 	//Manually synchronized between both logical threads
-	protected __gshared PinSignalWrapper[ubyte] pinSignalWrappers;
-	protected __gshared mixin(unrollVariableSignalWrappers!VarMonitorTypes());
+	protected shared PinSignalWrapper[ubyte] pinSignalWrappers;
+	protected shared mixin(unrollVariableSignalWrappers!VarMonitorTypes());
 
 	enum canMonitor(T) = __traits(compiles, mixin(varMonitorSignalWrappersName!T));
 
@@ -59,7 +60,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
 		if(pin !in pinSignalWrappers)
 		{
-			PinSignalWrapper signalWrapper = new PinSignalWrapper;
+			shared PinSignalWrapper signalWrapper = new PinSignalWrapper;
 
 			pinSignalWrappers[pin] = signalWrapper;
 
@@ -71,7 +72,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 		}
 		else
 		{
-			PinSignalWrapper signalWrapper = pinSignalWrappers[pin];
+			shared PinSignalWrapper signalWrapper = pinSignalWrappers[pin];
 
 			synchronized(signalWrapper)
 			{
@@ -91,7 +92,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 		enforce(communicationOn);
 		enforce(pin in pinSignalWrappers);
 
-		PinSignalWrapper signalWrapper = pinSignalWrappers[pin];
+		shared PinSignalWrapper signalWrapper = pinSignalWrappers[pin];
 
 		synchronized(signalWrapper)
 			signalWrapper.removeListener(listener);
@@ -103,7 +104,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 		}
 	}
 
-	void addVariableListener(MonitorType)(ubyte varIndex, void delegate(ubyte, MonitorType) listener)
+	void addVariableListener(MonitorType)(ubyte varIndex, void delegate(ubyte, MonitorType, long) shared listener)
 	if(canMonitor!MonitorType)
 	{
 		enforce(communicationOn);
@@ -120,7 +121,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 		}
 		else
 		{
-			auto wrapper = new SignalWrapper!(ubyte, MonitorType);
+			auto wrapper = new shared SignalWrapper!(ubyte, MonitorType, long);
 			wrapper.addListener(listener);
 			typeSignalWrappers[varIndex] = wrapper;
 
@@ -128,7 +129,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 		}
 	}
 
-	void removeVariableListener(MonitorType)(ubyte varIndex, void delegate(ubyte, MonitorType) listener)
+	void removeVariableListener(MonitorType)(ubyte varIndex, void delegate(ubyte, MonitorType, long) shared listener)
 	if(canMonitor!MonitorType)
 	{
 		enforce(communicationOn);
@@ -272,6 +273,8 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 																sendStopMonitoringVariableCmd(arduinoSerialPort, message.varTypeCode, message.varIndex);
 		}
 
+		StopWatch timer;
+
 		void handleReadBytes(ubyte[] readBytes)
 		in
 		{
@@ -309,11 +312,11 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 					ushort readValue = command[2] * ubytePossibleValues + command[3];
 					float realValue =  arduinoAnalogReference * to!float(readValue) / arduinoAnalogReadMax;
 
-					PinSignalWrapper signalWrapper = pinSignalWrappers[pin];
+					shared PinSignalWrapper signalWrapper = pinSignalWrappers[pin];
 
 					synchronized(signalWrapper)
 					{
-						signalWrapper.emit(pin, realValue);
+						signalWrapper.emit(pin, realValue, timer.peek().msecs);
 					}
 
 				}else
@@ -345,7 +348,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
 							synchronized(signalWrapper)
 							{
-								signalWrapper.emit(varIndex, data);
+								signalWrapper.emit(varIndex, data, timer.peek().msecs);
 							}
 						}
 						else
@@ -484,6 +487,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
 		communicationOn = true;
 		ownerTid.send(CommunicationEstablishedMessage(true));
+		timer.start();
 
 		do
 		{
@@ -633,12 +637,12 @@ private pure string unrollVariableSignalWrappers(VarTypes...)()
 }
 
 
-private pure enum varMonitorSignalWrappersType(VarType) = "SignalWrapper!(ubyte, " ~ VarType.stringof ~ ")[ubyte]";
+private pure enum varMonitorSignalWrappersType(VarType) = "SignalWrapper!(ubyte, " ~ VarType.stringof ~ ", long)[ubyte]";
 unittest
 {
-	assert(varMonitorSignalWrappersType!int == "SignalWrapper!(ubyte, int)[ubyte]");
-	assert(varMonitorSignalWrappersType!float == "SignalWrapper!(ubyte, float)[ubyte]");
-	assert(varMonitorSignalWrappersType!byte == "SignalWrapper!(ubyte, byte)[ubyte]");
+	assert(varMonitorSignalWrappersType!int == "SignalWrapper!(ubyte, int, long)[ubyte]");
+	assert(varMonitorSignalWrappersType!float == "SignalWrapper!(ubyte, float, long)[ubyte]");
+	assert(varMonitorSignalWrappersType!byte == "SignalWrapper!(ubyte, byte, long)[ubyte]");
 }
 
 

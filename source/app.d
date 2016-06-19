@@ -4,7 +4,6 @@ import std.getopt;
 import std.file;
 import std.concurrency;
 import std.conv;
-import std.datetime;
 import std.string;
 import std.format;
 
@@ -14,7 +13,7 @@ import puppeteer.puppeteer;
 import puppeteer.serial.BaudRate;
 import puppeteer.serial.Parity;
 
-__gshared StopWatch timer;
+immutable string loggerTidName = "loggerTid";
 
 void main(string[] args)
 {
@@ -56,6 +55,8 @@ void main(string[] args)
 			}
 		}, outFilename);
 
+	register(loggerTidName, loggerTid);
+
 	void showMenu()
 	{
 		enum Options
@@ -75,7 +76,7 @@ void main(string[] args)
 			writeln(to!string(int(option)) ~ " - " ~ optionMsg);
 		}
 
-		PuppetListener listener = new PuppetListener(puppetteer, loggerTid);
+		PuppetListener listener = new PuppetListener(puppetteer);
 
 		void addPinMonitor()
 		{
@@ -195,8 +196,6 @@ void main(string[] args)
 						if(puppetteer.startCommunication())
 						{
 							writeln("Communication established.");
-							timer.reset();
-							timer.start();
 						}
 						else
 							writeln("Could not establish communication with puppet.");
@@ -211,7 +210,6 @@ void main(string[] args)
 					{
 						puppetteer.endCommunication();
 						writeln("Communication ended.");
-						timer.stop();
 					}
 					else
 						writeln("Communication has not been established yet.");
@@ -273,22 +271,20 @@ void main(string[] args)
 class PuppetListener
 {
 	Puppetteer!short puppetteer;
-	Tid loggerTid;
 
-	this(Puppetteer!short puppetteer, Tid loggerTid)
+	this(Puppetteer!short puppetteer)
 	{
 		this.puppetteer = puppetteer;
-		this.loggerTid = loggerTid;
 	}
 
-	void pinListenerMethod(ubyte pin, float value)
+	void pinListenerMethod(ubyte pin, float value, long msecs) shared
 	{
-		loggerTid.send(MainMessage(to!string(timer.peek().msecs)~" => Pin "~to!string(pin)~" read "~to!string(value)));
+		locate(loggerTidName).send(MainMessage(to!string(msecs)~" => Pin "~to!string(pin)~" read "~to!string(value)));
 	}
 
-	void varListenerMethod(VarType)(ubyte varIndex, VarType value)
+	void varListenerMethod(VarType)(ubyte varIndex, VarType value, long msecs) shared
 	{
-		loggerTid.send(MainMessage(to!string(timer.peek().msecs)~" => Var "~to!string(varIndex)~ " of type " ~ VarType.stringof ~ " read "~to!string(value)));
+		locate(loggerTidName).send(MainMessage(to!string(msecs)~" => Var "~to!string(varIndex)~ " of type " ~ VarType.stringof ~ " read "~to!string(value)));
 	}
 
 	void addPinListener(ubyte pin)
