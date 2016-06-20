@@ -14,6 +14,7 @@ import std.exception;
 import std.signals;
 import std.meta;
 import std.datetime;
+import std.exception;
 
 import core.time;
 import core.thread;
@@ -56,7 +57,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 	}
 	body
 	{
-		enforce(communicationOn);
+		enforce!CommunicationException(communicationOn);
 
 		if(pin !in pinSignalWrappers)
 		{
@@ -89,7 +90,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 	}
 	body
 	{
-		enforce(communicationOn);
+		enforce!CommunicationException(communicationOn);
 		enforce(pin in pinSignalWrappers);
 
 		shared PinSignalWrapper signalWrapper = pinSignalWrappers[pin];
@@ -107,7 +108,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 	void addVariableListener(MonitorType)(ubyte varIndex, void delegate(ubyte, MonitorType, long) shared listener)
 	if(canMonitor!MonitorType)
 	{
-		enforce(communicationOn);
+		enforce!CommunicationException(communicationOn);
 		alias typeSignalWrappers = hack!(mixin(varMonitorSignalWrappersName!MonitorType));
 
 		if(varIndex in typeSignalWrappers)
@@ -132,7 +133,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 	void removeVariableListener(MonitorType)(ubyte varIndex, void delegate(ubyte, MonitorType, long) shared listener)
 	if(canMonitor!MonitorType)
 	{
-		enforce(communicationOn);
+		enforce!CommunicationException(communicationOn);
 		alias typeSignalWrappers = hack!(mixin(varMonitorSignalWrappersName!MonitorType));
 
 		enforce(varIndex in typeSignalWrappers);
@@ -150,19 +151,14 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 	}
 
 	void setPWM(ubyte pin, ubyte value)
-	in
 	{
-		assert(workerId != Tid.init);
-	}
-	body
-	{
-		enforce(communicationOn);
+		enforce!CommunicationException(communicationOn);
 		workerId.send(SetPWMMessage(pin, value));
 	}
 
 	bool startCommunication()
 	{
-		enforce(!communicationOn);
+		enforce!CommunicationException(!communicationOn);
 
 		workerId = spawn(&communicationLoop, filename, baudRate, parity);
 
@@ -172,7 +168,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
 	void endCommunication()
 	{
-		enforce(communicationOn);
+		enforce!CommunicationException(communicationOn);
 
 		workerId.send(EndCommunicationMessage());
 
@@ -182,6 +178,8 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 			synchronized(pinSignalWrappers[pin])
 				pinSignalWrappers.remove(pin);
 		}
+
+        //TODO: remove listeners for variables as well
 
 		receiveOnly!CommunicationEndedMessage();
 	}
@@ -589,10 +587,41 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 }
 unittest
 {
+    // Test for supported types
 	assert(__traits(compiles, Puppetteer!short));
 	assert(!__traits(compiles, Puppetteer!float));
 	assert(!__traits(compiles, Puppetteer!(short, float)));
 	assert(!__traits(compiles, Puppetteer!(short, void)));
+
+    class Foo
+    {
+        void pinListener(ubyte pin, float value, long msecs) shared
+        {
+
+        }
+
+        void varListener(T)(ubyte var, T value, long msecs) shared
+        {
+
+        }
+    }
+
+    auto a = new Puppetteer!short("fileName");
+    auto foo = new shared Foo;
+
+    assertThrown!CommunicationException(a.endCommunication());
+    assertThrown!CommunicationException(a.addPinListener(0, &foo.pinListener));
+    assertThrown!CommunicationException(a.removePinListener(0, &foo.pinListener));
+    assertThrown!CommunicationException(a.addVariableListener!short(0, &foo.varListener!short));
+    assertThrown!CommunicationException(a.removeVariableListener!short(0, &foo.varListener!short));
+}
+
+public class CommunicationException : Exception
+{
+    this(string msg, string file = __FILE__, size_t line = __LINE__)
+    {
+        super(msg, file, line, null);
+    }
 }
 
 private enum VarMonitorTypeCode : byte
