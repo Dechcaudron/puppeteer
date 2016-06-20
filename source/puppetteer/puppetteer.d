@@ -68,7 +68,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 			signalWrapper.addListener(listener);
 
 			writeln("Sending message to dynamically enable monitoring of pin "~to!string(pin));
-			workerId.send(CommunicationMessage(CommunicationMessagePurpose.startMonitoring, pin));
+			workerId.send(PinMonitorMessage(PinMonitorMessage.Action.start, pin));
 		}
 		else
 		{
@@ -100,7 +100,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 		if(signalWrapper.listenersNumber == 0)
 		{
 			pinSignalWrappers.remove(pin);
-			workerId.send(CommunicationMessage(CommunicationMessagePurpose.stopMonitoring, pin));
+			workerId.send(PinMonitorMessage(PinMonitorMessage.Action.stop, pin));
 		}
 	}
 
@@ -157,7 +157,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 	body
 	{
 		enforce(communicationOn);
-		workerId.send(CommunicationMessage(CommunicationMessagePurpose.setPWM, pin, value));
+		workerId.send(SetPWMMessage(pin, value));
 	}
 
 	bool startCommunication()
@@ -174,7 +174,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 	{
 		enforce(communicationOn);
 
-		workerId.send(CommunicationMessage(CommunicationMessagePurpose.endCommunication));
+		workerId.send(EndCommunicationMessage());
 
 		//Remove all listeners
 		foreach(pin; pinSignalWrappers.byKey())
@@ -203,28 +203,22 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
 		ISerialPort arduinoSerialPort;
 
-		void sendStartMonitoringCommand(ISerialPort serialPort, ubyte pin)
+		void sendStartMonitoringPinCmd(ISerialPort serialPort, ubyte pin)
 		{
 			writeln("Sending startMonitoringCommand for pin "~to!string(pin));
 			serialPort.write([commandControlByte, 0x01, pin]);
 		}
 
-		void sendStopMonitoringCommand(ISerialPort serialPort, ubyte pin)
+		void sendStopMonitoringPinCmd(ISerialPort serialPort, ubyte pin)
 		{
       		writeln("Sending stopMonitoringCommand for pin "~to!string(pin));
 			serialPort.write([commandControlByte, 0x02, pin]);
 		}
 
-		void sendSetPWMCommand(ISerialPort serialPort, ubyte pin, ubyte value)
+		void sendSetPWMCmd(ISerialPort serialPort, ubyte pin, ubyte value)
 		{
 			writeln("Sending setPWMCommand for pin "~to!string(pin)~" and value "~to!string(value));
 			serialPort.write([commandControlByte, 0x04, pin, value]);
-		}
-
-		void sendPuppeteerClosedCommand(ISerialPort serialPort)
-		{
-			writeln("Sending puppeteerClosedCommand");
-			serialPort.write([commandControlByte, 0x99]);
 		}
 
 		void sendStartMonitoringVariableCmd(ISerialPort serialPort, VarMonitorTypeCode typeCode, byte varIndex)
@@ -239,39 +233,43 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 			serialPort.write([commandControlByte, 0x06, typeCode, varIndex]);
 		}
 
-		void handleMessage(CommunicationMessage message)
+        void handlePinMonitorMessage(PinMonitorMessage msg)
+        {
+            final switch(msg.action) with (PinMonitorMessage.Action)
+            {
+                case start:
+                    sendStartMonitoringPinCmd(arduinoSerialPort, msg.pin);
+                    break;
+
+                case stop:
+                    sendStopMonitoringPinCmd(arduinoSerialPort, msg.pin);
+                    break;
+            }
+        }
+
+        void handleEndCommunicationMessage(EndCommunicationMessage msg)
+        {
+            shouldContinue = false;
+        }
+
+		void handleVarMonitorMessage(VarMonitorMessage msg)
 		{
-			with(CommunicationMessagePurpose)
-			{
-				switch(message.purpose)
-				{
-					case endCommunication:
-						shouldContinue = false;
-						break;
+            final switch(msg.action) with (VarMonitorMessage.Action)
+            {
+                case start:
+                    sendStartMonitoringVariableCmd(arduinoSerialPort, msg.varTypeCode, msg.varIndex);
+                    break;
 
-                    case startMonitoring:
-                        sendStartMonitoringCommand(arduinoSerialPort, message.pin);
-                        break;
-
-					case stopMonitoring:
-						sendStopMonitoringCommand(arduinoSerialPort, message.pin);
-						break;
-
-					case setPWM:
-						sendSetPWMCommand(arduinoSerialPort, message.pin, message.value);
-						break;
-
-					default:
-						writeln("Unhandled message purpose ", message.purpose, " received");
-				}
-			}
+                case stop:
+                    sendStopMonitoringVariableCmd(arduinoSerialPort, msg.varTypeCode, msg.varIndex);
+                    break;
+            }
 		}
 
-		void handleVarMonitorMessage(VarMonitorMessage message)
-		{
-			message.action == VarMonitorMessage.Action.start ? sendStartMonitoringVariableCmd(arduinoSerialPort, message.varTypeCode, message.varIndex) :
-																sendStopMonitoringVariableCmd(arduinoSerialPort, message.varTypeCode, message.varIndex);
-		}
+        void handleSetPWMMessage(SetPWMMessage msg)
+        {
+            sendSetPWMCmd(arduinoSerialPort, msg.pin, msg.value);
+        }
 
 		StopWatch timer;
 
@@ -499,11 +497,19 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 				handleReadBytes(readBytes);
 			}
 
-			receiveTimeout(msecs(receiveTimeoutMs), &handleMessage, &handleVarMonitorMessage);
+			receiveTimeout(msecs(receiveTimeoutMs), &handleEndCommunicationMessage,
+                                                    &handlePinMonitorMessage,
+                                                    &handleVarMonitorMessage,
+                                                    &handleSetPWMMessage);
 
 		}while(shouldContinue);
 
-		sendPuppeteerClosedCommand(arduinoSerialPort);
+        void sendPuppeteerClosedCmd(ISerialPort serialPort)
+		{
+			writeln("Sending puppeteerClosedCommand");
+			serialPort.write([commandControlByte, 0x99]);
+		}
+        sendPuppeteerClosedCmd(arduinoSerialPort);
 
 		communicationOn = false;
 		arduinoSerialPort.close();
@@ -526,6 +532,29 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
 	}
 
+    private struct EndCommunicationMessage
+    {
+
+    }
+
+    private struct PinMonitorMessage
+    {
+        enum Action
+        {
+            start,
+            stop
+        }
+
+        private Action action;
+        private ubyte pin;
+
+        this(Action action, ubyte pin)
+        {
+            this.action = action;
+            this.pin = pin;
+        }
+    }
+
 	private struct VarMonitorMessage
 	{
 		enum Action
@@ -545,6 +574,18 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 			this.varTypeCode = varTypeCode;
 		}
 	}
+
+    private struct SetPWMMessage
+    {
+        ubyte pin;
+        ubyte value;
+
+        this(ubyte pin, ubyte value)
+        {
+            this.pin = pin;
+            this.value = value;
+        }
+    }
 }
 unittest
 {
@@ -552,56 +593,6 @@ unittest
 	assert(!__traits(compiles, Puppetteer!float));
 	assert(!__traits(compiles, Puppetteer!(short, float)));
 	assert(!__traits(compiles, Puppetteer!(short, void)));
-}
-
-//TODO: split into multiple messages, this struct is horrible
-private struct CommunicationMessage
-{
-	CommunicationMessagePurpose purpose;
-	ubyte pin;
-	ubyte value;
-
-	this(CommunicationMessagePurpose purpose)
-	in
-	{
-		assert(purpose == CommunicationMessagePurpose.endCommunication);
-	}
-	body
-	{
-		this.purpose = purpose;
-	}
-
-	this(CommunicationMessagePurpose purpose, ubyte pin)
-	in
-	{
-		assert(purpose != CommunicationMessagePurpose.setPWM);
-	}
-	body
-	{
-		this.purpose = purpose;
-		this.pin = pin;
-	}
-
-	this(CommunicationMessagePurpose purpose, ubyte pin, ubyte value)
-	in
-	{
-		assert(purpose == CommunicationMessagePurpose.setPWM);
-	}
-	body
-	{
-		this.purpose = purpose;
-		this.pin = pin;
-		this.value = value;
-	}
-}
-
-private enum CommunicationMessagePurpose
-{
-	endCommunication,
-	startMonitoring,
-	stopMonitoring,
-	read,
-	setPWM,
 }
 
 private enum VarMonitorTypeCode : byte
