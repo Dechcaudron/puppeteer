@@ -60,11 +60,6 @@
  */
 module puppeteer.signal;
 
-import std.stdio;
-import core.stdc.stdlib : calloc, realloc, free;
-import core.exception : onOutOfMemoryError;
-import core.atomic : atomicOp;
-
 // Special function for internal use only.
 // Use of this is where the slot had better be a delegate
 // to an object or an interface that is part of an object.
@@ -84,6 +79,11 @@ extern (C) void  rt_detachDisposeEvent( Object obj, DisposeEvt evt );
 
 mixin template Signal(T1...)
 {
+    import std.stdio;
+    import core.stdc.stdlib : calloc, realloc, free;
+    import core.exception : onOutOfMemoryError;
+    import core.atomic : atomicOp;
+
     static import core.stdc.stdlib;
     static import core.exception;
     /***
@@ -172,7 +172,7 @@ mixin template Signal(T1...)
      * It causes any slots dependent on o to be removed from the list
      * of slots to be called by emit().
      */
-    final void unhook(Object o) shared
+    final private void unhook(Object o) shared
     {
         debug (signal) writefln("Signal.unhook(o = %s)", cast(void*)o);
         for (size_t i = 0; i < slots_idx; )
