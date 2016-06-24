@@ -3,12 +3,13 @@
     "description": "A library or cli app to easily communicate with programmable
     electronic boards such as Arduino implementing the \"puppet\" server interface,
     allowing for control of electronic ports or internal variables.",
-    
+
     "authors": ["Héctor Barreras Almarcha @Dechcaudron"],
     "license": "GPL-3.0",
 
     "dependencies" : {
-    		"onyx-serial" : "~>0.5.0"
+    		"onyx-serial" : "~>0.5.0",
+            "arith-eval": "~>0.1.0"
     	},
 
     "targetPath" : "out"

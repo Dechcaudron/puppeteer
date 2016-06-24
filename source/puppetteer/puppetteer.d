@@ -315,7 +315,8 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 						signalWrapper.emit(pin, realValue, timer.peek().msecs);
 					}
 
-				}else
+				}
+				else
 				{
 					writeln("No listeners registered for pin ",pin);
 				}
@@ -584,6 +585,8 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
             this.value = value;
         }
     }
+
+
 }
 unittest
 {
@@ -614,6 +617,46 @@ unittest
     assertThrown!CommunicationException(a.removePinListener(0, &foo.pinListener));
     assertThrown!CommunicationException(a.addVariableListener!short(0, &foo.varListener!short));
     assertThrown!CommunicationException(a.removeVariableListener!short(0, &foo.varListener!short));
+}
+
+// Templatized, but Evaluable only supports float so far :(
+private struct ValueAdapter(T)
+if(is (T == float))
+{
+	import arith_eval.evaluable;
+
+	private Evaluable!"x" evaluable;
+
+	this(string xBasedValueAdapterExpr)
+	{
+		try
+		{
+			evaluable = Evaluable!"x"(xBasedValueAdapterExpr);
+		}
+		catch(InvalidExpressionException e)
+		{
+			throw new InvalidAdapterExpressionException("Can't create ValueAdapter with expression " ~ xBasedValueAdapterExpr);
+		}
+	}
+
+	T adapt(T value)
+	{
+		return evaluable.eval(value);
+	}
+}
+unittest
+{
+	auto a = ValueAdapter!float("x / 3");
+	assert(a.adapt(3) == 1.0f);
+	assert(a.adapt(1) == 1.0f / 3);
+}
+
+public class InvalidAdapterExpressionException : Exception
+{
+	this(string msg, string file = __FILE__, size_t line = __LINE__)
+    {
+        super(msg, file, line, null);
+    }
 }
 
 public class CommunicationException : Exception
