@@ -1,9 +1,9 @@
 {
 	"fileVersion": 1,
 	"versions": {
-		"onyx-config": "2.0.5",
+		"arith-eval": "0.4.0",
 		"pegged": "0.3.2",
-		"arith-eval": "0.1.0",
-		"onyx-serial": "0.5.0"
+		"onyx-serial": "0.5.0",
+		"onyx-config": "2.0.5"
 	}
 }

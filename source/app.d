@@ -27,7 +27,7 @@ void main(string[] args)
 	enforce(devFilename != "" && exists(devFilename), "Please select an existing device using --dev [devicePath]");
 
 	writeln("Opening dev file "~devFilename);
-	auto puppetteer = new Puppetteer!short(devFilename, Parity.none, BaudRate.B9600);
+	auto puppeteer = new Puppeteer!short(devFilename, Parity.none, BaudRate.B9600);
 
 	Tid loggerTid = spawn(
 		(string outFilename)
@@ -68,6 +68,8 @@ void main(string[] args)
 			startVarMonitor,
 			stopVarMonitor,
 			pwm,
+            setAIAdapter,
+            setVarMonitorAdapter,
 			exit
 		}
 
@@ -76,7 +78,7 @@ void main(string[] args)
 			writeln(to!string(int(option)) ~ " - " ~ optionMsg);
 		}
 
-		PuppetListener listener = new PuppetListener(puppetteer);
+		PuppetListener listener = new PuppetListener(puppeteer);
 
 		void addPinMonitor()
 		{
@@ -157,8 +159,46 @@ void main(string[] args)
 			ubyte pin = to!ubyte(pinInput);
 
 			writeln("Setting PWM pin ", pin, " to value ", pwmValue);
-			puppetteer.setPWM(pin, pwmValue);
+			puppeteer.setPWM(pin, pwmValue);
 		}
+
+        void setAIValueAdapter()
+        {
+            write("Introduce adaptation for analog input [pin-f(x)] (-1 to cancel): ");
+
+            int pinInput = -1;
+            string expr;
+            string input = readln().chomp();
+            formattedRead(input, " %s-%s", &pinInput, &expr);
+
+            if(pinInput < 0)
+            {
+                return;
+            }
+
+            ubyte pin = to!ubyte(pinInput);
+            puppeteer.setAnalogInputValueAdapter(pin, expr);
+
+            writefln("Setting AI adapter for pin %s to f(x)=%s", pin, expr !is null ? expr : "x");
+        }
+
+        void setVarMonitorValueAdapter()
+        {
+            write("Introduce value adaptation for internal variable [varIndex-f(x)] (-1 to cancel): ");
+
+            int varIndexInput = -1;
+            string expr;
+            string input = readln().chomp();
+            formattedRead(input, " %s-%s", &varIndexInput, &expr);
+
+            if(varIndexInput < 0)
+                return;
+
+            ubyte varIndex = to!ubyte(varIndexInput);
+            puppeteer.setVarMonitorValueAdapter!short(varIndex, expr);
+
+            writefln("Setting variable adapter for internal variable %s to f(x)=%s", varIndex, expr !is null ? expr : "x");
+        }
 
 		menu : while(true)
 		{
@@ -173,6 +213,8 @@ void main(string[] args)
 				printOption(startVarMonitor, "Monitor internal variable");
 				printOption(stopVarMonitor, "Stop monitoring internal variable");
 				printOption(pwm, "Set PWM output");
+                printOption(setAIAdapter, "Set AI value adapter");
+                printOption(setVarMonitorAdapter, "Set internal variable value adapter");
 				printOption(exit, "Exit");
 			}
 			writeln();
@@ -190,10 +232,10 @@ void main(string[] args)
 			switch(option) with (Options)
 			{
 				case start:
-					if(!puppetteer.isCommunicationEstablished)
+					if(!puppeteer.isCommunicationEstablished)
 					{
 						writeln("Establishing communication with puppet...");
-						if(puppetteer.startCommunication())
+						if(puppeteer.startCommunication())
 						{
 							writeln("Communication established.");
 						}
@@ -206,9 +248,9 @@ void main(string[] args)
 					break;
 
 				case stop:
-					if(puppetteer.isCommunicationEstablished)
+					if(puppeteer.isCommunicationEstablished)
 					{
-						puppetteer.endCommunication();
+						puppeteer.endCommunication();
 						writeln("Communication ended.");
 					}
 					else
@@ -216,45 +258,53 @@ void main(string[] args)
 					break;
 
 				case startPinMonitor:
-					if(puppetteer.isCommunicationEstablished)
+					if(puppeteer.isCommunicationEstablished)
 						addPinMonitor();
 					else
 						printCommunicationRequired();
 					break;
 
 				case stopPinMonitor:
-					if(puppetteer.isCommunicationEstablished)
+					if(puppeteer.isCommunicationEstablished)
 						removePinMonitor();
 					else
 						printCommunicationRequired();
 					break;
 
 				case startVarMonitor:
-					if(puppetteer.isCommunicationEstablished)
+					if(puppeteer.isCommunicationEstablished)
 						addVarMonitor();
 					else
 						printCommunicationRequired();
 					break;
 
 				case stopVarMonitor:
-					if(puppetteer.isCommunicationEstablished)
+					if(puppeteer.isCommunicationEstablished)
 						removeVarMonitor();
 					else
 						printCommunicationRequired();
 					break;
 
 				case pwm:
-					if(puppetteer.isCommunicationEstablished)
+					if(puppeteer.isCommunicationEstablished)
 						setPWM();
 					else
 						printCommunicationRequired();
 					break;
 
+                case setAIAdapter:
+                    setAIValueAdapter();
+                    break;
+
+                case setVarMonitorAdapter:
+                    setVarMonitorValueAdapter();
+                    break;
+
 				case exit:
-					if(puppetteer.isCommunicationEstablished)
+					if(puppeteer.isCommunicationEstablished)
 					{
 						writeln("Finishing communication with puppet...");
-						puppetteer.endCommunication();
+						puppeteer.endCommunication();
 					}
 					loggerTid.send(MainMessage("END"));
 					break menu;
@@ -270,11 +320,11 @@ void main(string[] args)
 
 class PuppetListener
 {
-	Puppetteer!short puppetteer;
+	Puppeteer!short puppeteer;
 
-	this(Puppetteer!short puppetteer)
+	this(Puppeteer!short puppeteer)
 	{
-		this.puppetteer = puppetteer;
+		this.puppeteer = puppeteer;
 	}
 
 	void pinListenerMethod(ubyte pin, float value, long msecs) shared
@@ -289,22 +339,22 @@ class PuppetListener
 
 	void addPinListener(ubyte pin)
 	{
-		puppetteer.addPinListener(pin, &pinListenerMethod);
+		puppeteer.addPinListener(pin, &pinListenerMethod);
 	}
 
 	void removePinListener(ubyte pin)
 	{
-		puppetteer.removePinListener(pin, &pinListenerMethod);
+		puppeteer.removePinListener(pin, &pinListenerMethod);
 	}
 
 	void addVarListener(VarType)(ubyte varIndex)
 	{
-		puppetteer.addVariableListener(varIndex, &varListenerMethod!VarType);
+		puppeteer.addVariableListener(varIndex, &varListenerMethod!VarType);
 	}
 
 	void removeVarListener(VarType)(ubyte varIndex)
 	{
-		puppetteer.removeVariableListener(varIndex, &varListenerMethod!VarType);
+		puppeteer.removeVariableListener(varIndex, &varListenerMethod!VarType);
 	}
 }
 
