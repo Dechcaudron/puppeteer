@@ -65,6 +65,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     /// varIndex          =
     /// adapterExpression =
     void setVarMonitorValueAdapter(T)(ubyte varIndex, string adapterExpression)
+    if(canMonitor!T)
     {
         setAdapter(hack!(mixin(varMonitorValueAdaptersName!T)), varIndex, adapterExpression);
     }
@@ -215,6 +216,152 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     bool isCommunicationEstablished()
     {
         return communicationOn;
+    }
+
+    public bool saveConfig(string fileName)
+    {
+        string config = generateConfigString();
+
+        File f = File(fileName, "w");
+        scope(exit) f.close();
+
+        if(!f.isOpen)
+            return false;
+
+        f.write(config);
+        return true;
+    }
+
+    public bool loadConfig(string fileName)
+    {
+        File f = File(fileName, "r");
+        scope(exit) f.close();
+
+        if(!f.isOpen)
+            return false;
+
+        string content;
+        f.readf("%s", &content);
+
+        applyConfig(content);
+
+        return true;
+    }
+
+    private enum configAIAdaptersKey = "AIAdapters";
+    private enum configVarAdaptersKey = "VarAdapters";
+
+    private void applyConfig(string configStr)
+    {
+        import std.json;
+
+        JSONValue top = parseJSON(configStr);
+
+        JSONValue aiAdapters = top[configAIAdaptersKey].object;
+
+        foreach(string key, expr; aiAdapters)
+        {
+            setAnalogInputValueAdapter(to!ubyte(key), expr.str);
+        }
+
+        JSONValue varAdapters = top[configVarAdaptersKey].object;
+
+        void setVarMonitorAdapterDynamic(string typeName, ubyte varIndex, string expr)
+        {
+            string generateSwitch()
+            {
+                string str = "switch(typeName) {";
+
+                foreach(t; VarMonitorTypes)
+                {
+                    str ~= "case \"" ~ t.stringof ~ "\":";
+                    str ~= "setVarMonitorValueAdapter!" ~ t.stringof ~ "(varIndex, expr);";
+                    str ~= "break;";
+                }
+
+                //TODO: this should throw
+                str ~= "default: writeln(\"Type typeName is not supported for this Puppeteer\");";
+                str ~= "}";
+
+                return str;
+            }
+
+            mixin(generateSwitch());
+        }
+
+        foreach(string typeName, innerJson; varAdapters)
+        {
+            foreach(string varIndex, expr; innerJson)
+            {
+                setVarMonitorAdapterDynamic(typeName, to!ubyte(varIndex), expr.str);
+            }
+        }
+    }
+
+    private string generateConfigString()
+    {
+        import std.json;
+
+        enum emptyJson = string[string].init;
+
+        JSONValue config = JSONValue(emptyJson);
+        JSONValue AIAdapters = JSONValue(emptyJson);
+
+        foreach(pin, adapter; analogInputValueAdapters)
+        {
+            AIAdapters.object[to!string(pin)] = JSONValue(adapter.expression);
+        }
+
+        config.object[configAIAdaptersKey] = AIAdapters;
+
+        JSONValue varAdapters = JSONValue(emptyJson);
+
+        foreach(member; __traits(allMembers, VarMonitorTypeCode))
+        {
+            alias varMonitorAdapters = hack!(mixin(varMonitorValueAdaptersName!(varMonitorType!(hack!(mixin("VarMonitorTypeCode." ~ member))))));
+
+            string typeName = member[0 .. $-2];
+
+            JSONValue typeMonitorAdaptersJSON = JSONValue(emptyJson);
+
+            foreach(varIndex, adapter; varMonitorAdapters)
+            {
+                typeMonitorAdaptersJSON.object[to!string(varIndex)] = JSONValue(adapter.expression);
+            }
+
+            varAdapters.object[typeName] = typeMonitorAdaptersJSON;
+        }
+
+        config.object[configVarAdaptersKey] = varAdapters;
+
+        return config.toPrettyString();
+    }
+    unittest
+    {
+        import std.json;
+
+        auto a = new Puppeteer!short("filename");
+        a.setAnalogInputValueAdapter(0, "x");
+        a.setAnalogInputValueAdapter(3, "5+x");
+        a.setVarMonitorValueAdapter!short(1, "-x");
+        a.setVarMonitorValueAdapter!short(5, "x-3");
+
+        JSONValue ai = JSONValue(["0" : "x", "3" : "5+x"]);
+        JSONValue shorts = JSONValue(["1" : "-x", "5" : "x-3"]);
+        JSONValue vars = JSONValue(["short" : shorts]);
+        JSONValue mockConfig = JSONValue([configAIAdaptersKey : ai, configVarAdaptersKey : vars]);
+
+        assert(a.generateConfigString == mockConfig.toPrettyString());
+
+        enum filename = "tmpPup.test";
+
+        assert(a.saveConfig(filename));
+
+        auto b = new Puppeteer!short("filename");
+
+        b.loadConfig(filename);
+
+        assert(b.generateConfigString == mockConfig.toPrettyString());
     }
 
     private void communicationLoop(string fileName, immutable BaudRate baudRate, immutable Parity parity) shared
@@ -633,6 +780,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         import arith_eval.evaluable;
 
         private Evaluable!(T, "x") evaluable;
+        private string expression;
 
         this(string xBasedValueAdapterExpr)
         {
@@ -644,6 +792,8 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
             {
                 throw new InvalidAdapterExpressionException("Can't create ValueAdapter with expression " ~ xBasedValueAdapterExpr);
             }
+
+            expression = xBasedValueAdapterExpr;
         }
 
         T opCall(T value) const
@@ -716,6 +866,14 @@ public class CommunicationException : Exception
     }
 }
 
+public class InvalidConfigurationException : Exception
+{
+    this(string msg, string file = __FILE__, size_t line = __LINE__)
+    {
+        super(msg, file, line, null);
+    }
+}
+
 private enum VarMonitorTypeCode : byte
 {
     short_t = 0x0,
@@ -734,6 +892,16 @@ private alias varMonitorTypeCode(VarType) = hack!(mixin(VarMonitorTypeCode.strin
 unittest
 {
     assert(varMonitorTypeCode!short == VarMonitorTypeCode.short_t);
+}
+
+private alias h(T) = T;
+private alias varMonitorType(VarMonitorTypeCode typeCode) = h!(mixin("h!(" ~ to!string(typeCode)[0..$-2] ~ ")"));
+unittest
+{
+    with(VarMonitorTypeCode)
+    {
+        assert(is(varMonitorType!short_t == short));
+    }
 }
 
 private pure string unrollVariableSignalWrappers(VarTypes...)()
