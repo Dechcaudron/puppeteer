@@ -1,10 +1,16 @@
 module puppeteer.puppeteer;
 
-import puppeteer.serial.ISerialPort;
-import puppeteer.serial.BaudRate;
-import puppeteer.serial.Parity;
+import test.puppeteer.puppeteer_test : test;
+mixin test;
+
+public import puppeteer.serial.iserial_port;
+public import puppeteer.serial.baud_rate;
+public import puppeteer.serial.parity;
 
 import puppeteer.signal_wrapper;
+import puppeteer.exception.invalid_adapter_expression_exception;
+import puppeteer.exception.invalid_configuration_exception;
+import puppeteer.exception.communication_exception;
 
 import std.stdio;
 import std.concurrency;
@@ -19,10 +25,12 @@ import std.exception;
 import core.time;
 import core.thread;
 
-
 public alias pinListenerDelegate = void delegate (ubyte, float, long) shared;
 
 private alias hack(alias a) = a;
+
+private enum configAIAdaptersKey = "AIAdapters";
+private enum configVarAdaptersKey = "VarAdapters";
 
 class Puppeteer(VarMonitorTypes...)
 if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
@@ -36,7 +44,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     protected shared ValueAdapter!float[ubyte] analogInputValueAdapters;
     protected shared mixin(unrollVariableValueAdapters!VarMonitorTypes());
 
-    enum canMonitor(T) = __traits(compiles, mixin(varMonitorSignalWrappersName!T));
+    enum canMonitor(T) = __traits(compiles, mixin(getVarMonitorSignalWrappersName!T));
 
     protected shared bool communicationOn;
 
@@ -46,16 +54,16 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
     private Tid workerId;
 
-    this(string filename, Parity parity = Parity.none, BaudRate baudRate = BaudRate.B9600)
+    public this(string filename, Parity parity = Parity.none, BaudRate baudRate = BaudRate.B9600)
     {
         this.filename = filename;
         this.parity = parity;
         this.baudRate = baudRate;
     }
 
-    void setAnalogInputValueAdapter(ubyte pin, string adapterExpression)
+    public void setAnalogInputValueAdapter(ubyte pin, string adapterExpression)
     {
-       setAdapter(analogInputValueAdapters, pin, adapterExpression);
+        setAdapter(analogInputValueAdapters, pin, adapterExpression);
     }
 
     /// Sets a value adapter for an internal variable of type T
@@ -64,10 +72,10 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     ///
     /// varIndex          =
     /// adapterExpression =
-    void setVarMonitorValueAdapter(T)(ubyte varIndex, string adapterExpression)
+    public void setVarMonitorValueAdapter(T)(ubyte varIndex, string adapterExpression)
     if(canMonitor!T)
     {
-        setAdapter(hack!(mixin(varMonitorValueAdaptersName!T)), varIndex, adapterExpression);
+        setAdapter(hack!(mixin(getVarMonitorValueAdaptersName!T)), varIndex, adapterExpression);
     }
 
     private void setAdapter(T)(ref shared ValueAdapter!T[ubyte] adapterDict, ubyte position, string adapterExpression)
@@ -78,7 +86,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
             adapterDict.remove(position);
     }
 
-    void addPinListener(ubyte pin, pinListenerDelegate listener)
+    public void addPinListener(ubyte pin, pinListenerDelegate listener)
     in
     {
         assert(listener !is null);
@@ -112,7 +120,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     }
 
 
-    void removePinListener(ubyte pin, pinListenerDelegate listener)
+    public void removePinListener(ubyte pin, pinListenerDelegate listener)
     in
     {
         assert(listener !is null);
@@ -134,12 +142,11 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         }
     }
 
-    void addVariableListener(MonitorType)(ubyte varIndex, void delegate(ubyte, MonitorType, long) shared listener)
+    public void addVariableListener(MonitorType)(ubyte varIndex, void delegate(ubyte, MonitorType, long) shared listener)
     if(canMonitor!MonitorType)
     {
         enforce!CommunicationException(communicationOn);
-        alias typeSignalWrappers = hack!(mixin(varMonitorSignalWrappersName!MonitorType));
-
+        alias typeSignalWrappers = hack!(mixin(getVarMonitorSignalWrappersName!MonitorType));
         auto wrapper = varIndex in typeSignalWrappers;
         if(wrapper)
         {
@@ -153,16 +160,15 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
             auto signalWrapper = new shared SignalWrapper!(ubyte, MonitorType, long);
             signalWrapper.addListener(listener);
             typeSignalWrappers[varIndex] = signalWrapper;
-
-            workerId.send(VarMonitorMessage(VarMonitorMessage.Action.start, varIndex, varMonitorTypeCode!MonitorType));
+                workerId.send(VarMonitorMessage(VarMonitorMessage.Action.start, varIndex, getVarMonitorTypeCode!MonitorType));
         }
     }
 
-    void removeVariableListener(MonitorType)(ubyte varIndex, void delegate(ubyte, MonitorType, long) shared listener)
+    public void removeVariableListener(MonitorType)(ubyte varIndex, void delegate(ubyte, MonitorType, long) shared listener)
     if(canMonitor!MonitorType)
     {
         enforce!CommunicationException(communicationOn);
-        alias typeSignalWrappers = hack!(mixin(varMonitorSignalWrappersName!MonitorType));
+        alias typeSignalWrappers = hack!(mixin(getVarMonitorSignalWrappersName!MonitorType));
 
         enforce(varIndex in typeSignalWrappers);
 
@@ -174,17 +180,17 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         if(signalWrapper.listenersNumber == 0)
         {
             typeSignalWrappers.remove(varIndex);
-            workerId.send(VarMonitorMessage(VarMonitorMessage.Action.stop, varIndex, varMonitorTypeCode!MonitorType));
+            workerId.send(VarMonitorMessage(VarMonitorMessage.Action.stop, varIndex, getVarMonitorTypeCode!MonitorType));
         }
     }
 
-    void setPWM(ubyte pin, ubyte value)
+    public void setPWM(ubyte pin, ubyte value)
     {
         enforce!CommunicationException(communicationOn);
         workerId.send(SetPWMMessage(pin, value));
     }
 
-    bool startCommunication()
+    public bool startCommunication()
     {
         enforce!CommunicationException(!communicationOn);
 
@@ -194,7 +200,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         return msg.success;
     }
 
-    void endCommunication()
+    public void endCommunication()
     {
         enforce!CommunicationException(communicationOn);
 
@@ -219,6 +225,12 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     }
 
     public bool saveConfig(string fileName)
+    in
+    {
+        assert(filename !is null);
+        assert(filename != "");
+    }
+    body
     {
         string config = generateConfigString();
 
@@ -233,6 +245,12 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     }
 
     public bool loadConfig(string fileName)
+    in
+    {
+        assert(filename !is null);
+        assert(filename != "");
+    }
+    body
     {
         File f = File(fileName, "r");
         scope(exit) f.close();
@@ -248,10 +266,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         return true;
     }
 
-    private enum configAIAdaptersKey = "AIAdapters";
-    private enum configVarAdaptersKey = "VarAdapters";
-
-    private void applyConfig(string configStr)
+    package void applyConfig(string configStr)
     {
         import std.json;
 
@@ -279,8 +294,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
                     str ~= "break;";
                 }
 
-                //TODO: this should throw
-                str ~= "default: writeln(\"Type typeName is not supported for this Puppeteer\");";
+                str ~= "default: throw new InvalidConfigurationException(\"Type \" ~ typeName ~ \" is not supported by this Puppeteer\");";
                 str ~= "}";
 
                 return str;
@@ -318,51 +332,31 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
         foreach(member; __traits(allMembers, VarMonitorTypeCode))
         {
-            alias varMonitorAdapters = hack!(mixin(varMonitorValueAdaptersName!(varMonitorType!(hack!(mixin("VarMonitorTypeCode." ~ member))))));
-
-            string typeName = member[0 .. $-2];
-
-            JSONValue typeMonitorAdaptersJSON = JSONValue(emptyJson);
-
-            foreach(varIndex, adapter; varMonitorAdapters)
+            static if(canMonitor!(getVarMonitorType!(hack!(mixin("VarMonitorTypeCode." ~ member)))))
             {
-                typeMonitorAdaptersJSON.object[to!string(varIndex)] = JSONValue(adapter.expression);
-            }
+                alias varMonitorAdapters = hack!(mixin(getVarMonitorValueAdaptersName!(getVarMonitorType!(hack!(mixin("VarMonitorTypeCode." ~ member))))));
 
-            varAdapters.object[typeName] = typeMonitorAdaptersJSON;
+                if(varMonitorAdapters.length > 0)
+                {
+                    string typeName = member[0 .. $-2];
+
+                    JSONValue typeMonitorAdaptersJSON = JSONValue(emptyJson);
+
+                    foreach(varIndex, adapter; varMonitorAdapters)
+                    {
+                        typeMonitorAdaptersJSON.object[to!string(varIndex)] = JSONValue(adapter.expression);
+                    }
+
+                    varAdapters.object[typeName] = typeMonitorAdaptersJSON;
+                }
+            }
         }
 
         config.object[configVarAdaptersKey] = varAdapters;
 
         return config.toPrettyString();
     }
-    unittest
-    {
-        import std.json;
 
-        auto a = new Puppeteer!short("filename");
-        a.setAnalogInputValueAdapter(0, "x");
-        a.setAnalogInputValueAdapter(3, "5+x");
-        a.setVarMonitorValueAdapter!short(1, "-x");
-        a.setVarMonitorValueAdapter!short(5, "x-3");
-
-        JSONValue ai = JSONValue(["0" : "x", "3" : "5+x"]);
-        JSONValue shorts = JSONValue(["1" : "-x", "5" : "x-3"]);
-        JSONValue vars = JSONValue(["short" : shorts]);
-        JSONValue mockConfig = JSONValue([configAIAdaptersKey : ai, configVarAdaptersKey : vars]);
-
-        assert(a.generateConfigString == mockConfig.toPrettyString());
-
-        enum filename = "tmpPup.test";
-
-        assert(a.saveConfig(filename));
-
-        auto b = new Puppeteer!short("filename");
-
-        b.loadConfig(filename);
-
-        assert(b.generateConfigString == mockConfig.toPrettyString());
-    }
 
     private void communicationLoop(string fileName, immutable BaudRate baudRate, immutable Parity parity) shared
     {
@@ -512,12 +506,13 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
                 debug(2) writeln("Handling varMonitorCommand ", command);
 
                 void handleData(VarType)(ubyte varIndex, ubyte[] data)
+                if(canMonitor!VarType)
                 {
                     void emitData(VarType)(ubyte varIndex, VarType data)
                     {
-                        alias varTypeSignalWrappers = hack!(mixin(varMonitorSignalWrappersName!VarType));
-
+                        alias varTypeSignalWrappers = hack!(mixin(getVarMonitorSignalWrappersName!VarType));
                         auto wrapper = varIndex in varTypeSignalWrappers;
+
                         if(wrapper)
                         {
                             auto signalWrapper = *wrapper;
@@ -539,7 +534,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
                     VarType adaptData(VarType)(VarType data)
                     {
-                        alias typeAdapters = hack!(mixin(varMonitorValueAdaptersName!VarType));
+                        alias typeAdapters = hack!(mixin(getVarMonitorValueAdaptersName!VarType));
 
                         auto adapter = varIndex in typeAdapters;
 
@@ -554,18 +549,28 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
                 void delegate (ubyte, ubyte[]) selectDelegate(VarMonitorTypeCode typeCode)
                 {
-                    //TODO: this could be generated with a mixin
-                    final switch(typeCode) with (VarMonitorTypeCode)
+                    string generateSwitch()
                     {
-                        case short_t:
-                            return &handleData!short;
+                        string str = "switch (typeCode) with (VarMonitorTypeCode) {";
+
+                        foreach(varType; VarMonitorTypes)
+                        {
+                            str ~= "case " ~ (getVarMonitorTypeCode!varType).stringof ~ ": return &handleData!" ~ varType.stringof ~ ";";
+                        }
+
+                        str ~= "default: return null; }" ;
+
+                        return str;
                     }
+
+                    mixin(generateSwitch());
                 }
 
                 try
                 {
                     auto handler = selectDelegate(to!VarMonitorTypeCode(command[1]));
-                    handler(command[2], command[3..$]);
+                    if(handler)
+                        handler(command[2], command[3..$]);
                 }catch(ConvException e)
                 {
                     writeln("Received invalid varMonitor type: ",e);
@@ -686,9 +691,9 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
             }
 
             receiveTimeout(msecs(receiveTimeoutMs), &handleEndCommunicationMessage,
-                                                    &handlePinMonitorMessage,
-                                                    &handleVarMonitorMessage,
-                                                    &handleSetPWMMessage);
+                    &handlePinMonitorMessage,
+                    &handleVarMonitorMessage,
+                    &handleSetPWMMessage);
 
         }while(shouldContinue);
 
@@ -775,103 +780,51 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         }
     }
 
-    private static shared struct ValueAdapter(T)
+
+}
+
+private shared struct ValueAdapter(T)
+{
+    import arith_eval.evaluable;
+
+    private Evaluable!(T, "x") evaluable;
+    private string expression;
+
+    this(string xBasedValueAdapterExpr)
     {
-        import arith_eval.evaluable;
-
-        private Evaluable!(T, "x") evaluable;
-        private string expression;
-
-        this(string xBasedValueAdapterExpr)
+        try
         {
-            try
-            {
-                evaluable = Evaluable!(T,"x")(xBasedValueAdapterExpr);
-            }
-            catch(InvalidExpressionException e)
-            {
-                throw new InvalidAdapterExpressionException("Can't create ValueAdapter with expression " ~ xBasedValueAdapterExpr);
-            }
-
-            expression = xBasedValueAdapterExpr;
+            evaluable = Evaluable!(T,"x")(xBasedValueAdapterExpr);
+        }
+        catch(InvalidExpressionException e)
+        {
+            throw new InvalidAdapterExpressionException("Can't create ValueAdapter with expression " ~ xBasedValueAdapterExpr);
         }
 
-        T opCall(T value) const
-        {
-            return evaluable(value);
-        }
+        expression = xBasedValueAdapterExpr;
     }
-    unittest
+
+    T opCall(T value) const
     {
-        auto a = shared ValueAdapter!float("x / 3");
-        assert(a(3) == 1.0f);
-        assert(a(1) == 1.0f / 3);
-
-        auto b = shared ValueAdapter!float("x**2 + 1");
-        assert(b(3) == 10.0f);
-        assert(b(5) == 26.0f);
-
-        b = shared ValueAdapter!float("x");
-        assert(b(1) == 1f);
-
-        auto c = shared ValueAdapter!int("x * 3");
-        assert(c(3) == 9);
-
+        return evaluable(value);
     }
 }
 unittest
 {
-    // Test for supported types
-    assert(__traits(compiles, Puppeteer!short));
-    assert(!__traits(compiles, Puppeteer!float));
-    assert(!__traits(compiles, Puppeteer!(short, float)));
-    assert(!__traits(compiles, Puppeteer!(short, void)));
+    auto a = shared ValueAdapter!float("x / 3");
+    assert(a(3) == 1.0f);
+    assert(a(1) == 1.0f / 3);
 
-    class Foo
-    {
-        void pinListener(ubyte pin, float value, long msecs) shared
-        {
+    auto b = shared ValueAdapter!float("x**2 + 1");
+    assert(b(3) == 10.0f);
+    assert(b(5) == 26.0f);
 
-        }
+    b = shared ValueAdapter!float("x");
+    assert(b(1) == 1f);
 
-        void varListener(T)(ubyte var, T value, long msecs) shared
-        {
+    auto c = shared ValueAdapter!int("x * 3");
+    assert(c(3) == 9);
 
-        }
-    }
-
-    auto a = new Puppeteer!short("fileName");
-    auto foo = new shared Foo;
-
-    assertThrown!CommunicationException(a.endCommunication());
-    assertThrown!CommunicationException(a.addPinListener(0, &foo.pinListener));
-    assertThrown!CommunicationException(a.removePinListener(0, &foo.pinListener));
-    assertThrown!CommunicationException(a.addVariableListener!short(0, &foo.varListener!short));
-    assertThrown!CommunicationException(a.removeVariableListener!short(0, &foo.varListener!short));
-}
-
-public class InvalidAdapterExpressionException : Exception
-{
-    this(string msg, string file = __FILE__, size_t line = __LINE__)
-    {
-        super(msg, file, line, null);
-    }
-}
-
-public class CommunicationException : Exception
-{
-    this(string msg, string file = __FILE__, size_t line = __LINE__)
-    {
-        super(msg, file, line, null);
-    }
-}
-
-public class InvalidConfigurationException : Exception
-{
-    this(string msg, string file = __FILE__, size_t line = __LINE__)
-    {
-        super(msg, file, line, null);
-    }
 }
 
 private enum VarMonitorTypeCode : byte
@@ -879,7 +832,7 @@ private enum VarMonitorTypeCode : byte
     short_t = 0x0,
 }
 
-private enum isVarMonitorTypeSupported(VarType) = __traits(compiles, varMonitorTypeCode!VarType);
+private enum isVarMonitorTypeSupported(VarType) = __traits(compiles, getVarMonitorTypeCode!VarType);
 unittest
 {
     assert(isVarMonitorTypeSupported!short);
@@ -888,19 +841,19 @@ unittest
 }
 
 
-private alias varMonitorTypeCode(VarType) = hack!(mixin(VarMonitorTypeCode.stringof ~ "." ~ VarType.stringof ~ "_t"));
+private alias getVarMonitorTypeCode(VarType) = hack!(mixin(VarMonitorTypeCode.stringof ~ "." ~ VarType.stringof ~ "_t"));
 unittest
 {
-    assert(varMonitorTypeCode!short == VarMonitorTypeCode.short_t);
+    assert(getVarMonitorTypeCode!short == VarMonitorTypeCode.short_t);
 }
 
 private alias h(T) = T;
-private alias varMonitorType(VarMonitorTypeCode typeCode) = h!(mixin("h!(" ~ to!string(typeCode)[0..$-2] ~ ")"));
+private alias getVarMonitorType(VarMonitorTypeCode typeCode) = h!(mixin("h!(" ~ to!string(typeCode)[0..$-2] ~ ")"));
 unittest
 {
     with(VarMonitorTypeCode)
     {
-        assert(is(varMonitorType!short_t == short));
+        assert(is(getVarMonitorType!short_t == short));
     }
 }
 
@@ -910,26 +863,26 @@ private pure string unrollVariableSignalWrappers(VarTypes...)()
 
     foreach(varType; VarTypes)
     {
-        unroll ~= varMonitorSignalWrappersType!varType ~ " " ~ varMonitorSignalWrappersName!varType ~ ";\n";
+        unroll ~= getVarMonitorSignalWrappersType!varType ~ " " ~ getVarMonitorSignalWrappersName!varType ~ ";\n";
     }
 
     return unroll;
 }
 
 
-private enum varMonitorSignalWrappersType(VarType) = "SignalWrapper!(ubyte, " ~ VarType.stringof ~ ", long)[ubyte]";
+private enum getVarMonitorSignalWrappersType(VarType) = "SignalWrapper!(ubyte, " ~ VarType.stringof ~ ", long)[ubyte]";
 unittest
 {
-    assert(varMonitorSignalWrappersType!int == "SignalWrapper!(ubyte, int, long)[ubyte]");
-    assert(varMonitorSignalWrappersType!float == "SignalWrapper!(ubyte, float, long)[ubyte]");
-    assert(varMonitorSignalWrappersType!byte == "SignalWrapper!(ubyte, byte, long)[ubyte]");
+    assert(getVarMonitorSignalWrappersType!int == "SignalWrapper!(ubyte, int, long)[ubyte]");
+    assert(getVarMonitorSignalWrappersType!float == "SignalWrapper!(ubyte, float, long)[ubyte]");
+    assert(getVarMonitorSignalWrappersType!byte == "SignalWrapper!(ubyte, byte, long)[ubyte]");
 }
 
 
-private enum varMonitorSignalWrappersName(VarType) = VarType.stringof ~ "SignalWrappers";
+private enum getVarMonitorSignalWrappersName(VarType) = VarType.stringof ~ "SignalWrappers";
 unittest
 {
-    assert(varMonitorSignalWrappersName!int == "intSignalWrappers");
+    assert(getVarMonitorSignalWrappersName!int == "intSignalWrappers");
 }
 
 
@@ -939,11 +892,11 @@ private pure string unrollVariableValueAdapters(VarTypes...)()
 
     foreach(varType; VarTypes)
     {
-        unroll ~= varMonitorValueAdaptersType!varType ~ " " ~ varMonitorValueAdaptersName!varType ~ ";\n";
+        unroll ~= getVarMonitorValueAdaptersType!varType ~ " " ~ getVarMonitorValueAdaptersName!varType ~ ";\n";
     }
 
     return unroll;
 }
 
-private enum varMonitorValueAdaptersType(VarType) = "ValueAdapter!(" ~ VarType.stringof ~ ")[ubyte]";
-private enum varMonitorValueAdaptersName(VarType) = VarType.stringof ~ "ValueAdapters";
+private enum getVarMonitorValueAdaptersType(VarType) = "ValueAdapter!(" ~ VarType.stringof ~ ")[ubyte]";
+private enum getVarMonitorValueAdaptersName(VarType) = VarType.stringof ~ "ValueAdapters";

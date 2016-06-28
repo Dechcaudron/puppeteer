@@ -10,8 +10,6 @@ import std.format;
 import core.thread;
 
 import puppeteer.puppeteer;
-import puppeteer.serial.BaudRate;
-import puppeteer.serial.Parity;
 
 immutable string loggerTidName = "loggerTid";
 
@@ -26,7 +24,7 @@ void main(string[] args)
 
 	enforce(devFilename != "" && exists(devFilename), "Please select an existing device using --dev [devicePath]");
 
-	writeln("Opening dev file "~devFilename);
+	writeln("Opening device file " ~ devFilename);
 	auto puppeteer = new Puppeteer!short(devFilename, Parity.none, BaudRate.B9600);
 
 	Tid loggerTid = spawn(
@@ -70,6 +68,8 @@ void main(string[] args)
 			pwm,
             setAIAdapter,
             setVarMonitorAdapter,
+            saveConfig,
+            loadConfig,
 			exit
 		}
 
@@ -162,14 +162,14 @@ void main(string[] args)
 			puppeteer.setPWM(pin, pwmValue);
 		}
 
-        void setAIValueAdapter()
+        void setAIAdapter()
         {
-            write("Introduce adaptation for analog input [pin-f(x)] (-1 to cancel): ");
+            write("Analog input adapter [pin:f(x)] (-1 to cancel): ");
 
             int pinInput = -1;
             string expr;
             string input = readln().chomp();
-            formattedRead(input, " %s-%s", &pinInput, &expr);
+            formattedRead(input, " %s:%s", &pinInput, &expr);
 
             if(pinInput < 0)
             {
@@ -182,14 +182,14 @@ void main(string[] args)
             writefln("Setting AI adapter for pin %s to f(x)=%s", pin, expr !is null ? expr : "x");
         }
 
-        void setVarMonitorValueAdapter()
+        void setVarMonitorAdapter()
         {
-            write("Introduce value adaptation for internal variable [varIndex-f(x)] (-1 to cancel): ");
+            write("Internal variable adapter [varIndex:f(x)] (-1 to cancel): ");
 
             int varIndexInput = -1;
             string expr;
             string input = readln().chomp();
-            formattedRead(input, " %s-%s", &varIndexInput, &expr);
+            formattedRead(input, " %s:%s", &varIndexInput, &expr);
 
             if(varIndexInput < 0)
                 return;
@@ -198,6 +198,78 @@ void main(string[] args)
             puppeteer.setVarMonitorValueAdapter!short(varIndex, expr);
 
             writefln("Setting variable adapter for internal variable %s to f(x)=%s", varIndex, expr !is null ? expr : "x");
+        }
+
+        void saveConfigUI()
+        {
+            write("Path of the file to save the puppeteer configuration in (<empty + Enter> to cancel): ");
+
+            string filename;
+            string input = readln().chomp();
+            formattedRead(input, " %s", &filename);
+
+            if(filename == "")
+            {
+                writeln("Configuration saving has been cancelled.");
+                return;
+            }
+
+            bool failedToWrite = false;
+            try
+            {
+                if(puppeteer.saveConfig(filename))
+                    writefln("Configuration saved to %s.", filename);
+                else
+                    failedToWrite = true;
+            }
+            catch(Exception e)
+            {
+                debug writeln(e);
+                failedToWrite = true;
+            }
+
+            if(failedToWrite)
+                writefln("Could not save configuration to %s.", filename);
+        }
+
+        void loadConfigUI()
+        {
+            write("Path of the file to load the puppeteer configuration from (<empty + Enter> to cancel): ");
+
+            string filename;
+            string input = readln().chomp();
+            formattedRead(input, " %s", &filename);
+
+            if(filename == "")
+            {
+                writeln("Configutation loading has been cancelled.");
+                return;
+            }
+
+            import puppeteer.exception.invalid_configuration_exception : InvalidConfigurationException;
+
+            bool failedToRead = false;
+
+            try
+            {
+                if(puppeteer.loadConfig(filename))
+                    writefln("Loaded configuration from file %s into the puppeteer.", filename);
+                else
+                    failedToRead = true;
+            }
+            catch(InvalidConfigurationException e)
+            {
+                debug writeln(e);
+                writefln("The configuration from %s is not valid for this puppeteer.", filename);
+            }
+            catch(Exception e)
+            {
+                debug writeln(e);
+                failedToRead = true;
+            }
+
+            if(failedToRead)
+                writefln("Could not load configuration from %s.", filename);
         }
 
 		menu : while(true)
@@ -215,6 +287,8 @@ void main(string[] args)
 				printOption(pwm, "Set PWM output");
                 printOption(setAIAdapter, "Set AI value adapter");
                 printOption(setVarMonitorAdapter, "Set internal variable value adapter");
+                printOption(saveConfig, "Save puppeteer configuration");
+                printOption(loadConfig, "Load puppeteer configuration");
 				printOption(exit, "Exit");
 			}
 			writeln();
@@ -229,9 +303,9 @@ void main(string[] args)
 				writeln("An established communication is required for this option.");
 			}
 
-			switch(option) with (Options)
+			switch(option)
 			{
-				case start:
+				case Options.start:
 					if(!puppeteer.isCommunicationEstablished)
 					{
 						writeln("Establishing communication with puppet...");
@@ -247,7 +321,7 @@ void main(string[] args)
 
 					break;
 
-				case stop:
+				case Options.stop:
 					if(puppeteer.isCommunicationEstablished)
 					{
 						puppeteer.endCommunication();
@@ -257,50 +331,58 @@ void main(string[] args)
 						writeln("Communication has not been established yet.");
 					break;
 
-				case startPinMonitor:
+				case Options.startPinMonitor:
 					if(puppeteer.isCommunicationEstablished)
 						addPinMonitor();
 					else
 						printCommunicationRequired();
 					break;
 
-				case stopPinMonitor:
+				case Options.stopPinMonitor:
 					if(puppeteer.isCommunicationEstablished)
 						removePinMonitor();
 					else
 						printCommunicationRequired();
 					break;
 
-				case startVarMonitor:
+				case Options.startVarMonitor:
 					if(puppeteer.isCommunicationEstablished)
 						addVarMonitor();
 					else
 						printCommunicationRequired();
 					break;
 
-				case stopVarMonitor:
+				case Options.stopVarMonitor:
 					if(puppeteer.isCommunicationEstablished)
 						removeVarMonitor();
 					else
 						printCommunicationRequired();
 					break;
 
-				case pwm:
+				case Options.pwm:
 					if(puppeteer.isCommunicationEstablished)
 						setPWM();
 					else
 						printCommunicationRequired();
 					break;
 
-                case setAIAdapter:
-                    setAIValueAdapter();
+                case Options.setAIAdapter:
+                    setAIAdapter();
                     break;
 
-                case setVarMonitorAdapter:
-                    setVarMonitorValueAdapter();
+                case Options.setVarMonitorAdapter:
+                    setVarMonitorAdapter();
                     break;
 
-				case exit:
+                case Options.saveConfig:
+                    saveConfigUI();
+                    break;
+
+                case Options.loadConfig:
+                    loadConfigUI();
+                    break;
+
+				case Options.exit:
 					if(puppeteer.isCommunicationEstablished)
 					{
 						writeln("Finishing communication with puppet...");

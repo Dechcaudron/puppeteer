@@ -1,8 +1,8 @@
-module puppeteer.serial.OxSerialPortWrapper;
+module puppeteer.serial.ox_serial_port_wrapper;
 
-import puppeteer.serial.ISerialPort;
-import puppeteer.serial.BaudRate;
-import puppeteer.serial.Parity;
+import puppeteer.serial.iserial_port;
+import puppeteer.serial.baud_rate;
+import puppeteer.serial.parity;
 
 import onyx.serial : OnyxParity = Parity, OnyxBaudRate = Speed;
 import onyx.serial : OxSerialPort, SerialPortTimeOutException;

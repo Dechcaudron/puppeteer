@@ -1,8 +1,8 @@
-module puppeteer.serial.ISerialPort;
+module puppeteer.serial.iserial_port;
 
-import puppeteer.serial.BaudRate;
-import puppeteer.serial.Parity;
-import puppeteer.serial.OxSerialPortWrapper;
+import puppeteer.serial.baud_rate;
+import puppeteer.serial.parity;
+import puppeteer.serial.ox_serial_port_wrapper;
 
 interface ISerialPort
 {
