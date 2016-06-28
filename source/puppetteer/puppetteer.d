@@ -55,7 +55,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
     void setAnalogInputValueAdapter(ubyte pin, string adapterExpression)
     {
-       setAdapter(analogInputValueAdapters, pin, adapterExpression); 
+       setAdapter(analogInputValueAdapters, pin, adapterExpression);
     }
 
     /// Sets a value adapter for an internal variable of type T
@@ -74,7 +74,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         if(adapterExpression)
             adapterDict[position] = shared ValueAdapter!T(adapterExpression);
         else
-            adapterDict.remove(position); 
+            adapterDict.remove(position);
     }
 
     void addPinListener(ubyte pin, pinListenerDelegate listener)
@@ -395,11 +395,11 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
                         alias typeAdapters = hack!(mixin(varMonitorValueAdaptersName!VarType));
 
                         auto adapter = varIndex in typeAdapters;
-                        
+
                         if(adapter)
                             return adapter.opCall(data);
                         else
-                            return data; 
+                            return data;
                     }
 
                     emitData(varIndex, adaptData(decodeData!VarType(data)));
@@ -653,20 +653,20 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     }
     unittest
     {
-        auto a = ValueAdapter!float("x / 3");
+        auto a = shared ValueAdapter!float("x / 3");
         assert(a(3) == 1.0f);
         assert(a(1) == 1.0f / 3);
 
-        auto b = ValueAdapter!float("x**2 + 1");
+        auto b = shared ValueAdapter!float("x**2 + 1");
         assert(b(3) == 10.0f);
         assert(b(5) == 26.0f);
 
-        b = ValueAdapter!float("x");
+        b = shared ValueAdapter!float("x");
         assert(b(1) == 1f);
 
-        auto c = ValueAdapter!int("x * 3");
+        auto c = shared ValueAdapter!int("x * 3");
         assert(c(3) == 9);
-        
+
     }
 }
 unittest
