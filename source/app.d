@@ -2,12 +2,9 @@ import std.stdio;
 import std.exception;
 import std.getopt;
 import std.file;
-import std.concurrency;
 import std.conv;
 import std.string;
 import std.format;
-
-import core.thread;
 
 import puppeteer.puppeteer;
 
@@ -16,44 +13,16 @@ immutable string loggerTidName = "loggerTid";
 void main(string[] args)
 {
 	string devFilename = "";
-	string outFilename = "puppeteerOut.txt";
+	string loggingFilename = "puppeteerOut.txt";
 
 	getopt(args,
 		"dev|d", &devFilename,
-		"out|o", &outFilename);
+		"out|o", &loggingFilename);
 
 	enforce(devFilename != "" && exists(devFilename), "Please select an existing device using --dev [devicePath]");
 
 	writeln("Opening device file " ~ devFilename);
 	auto puppeteer = new Puppeteer!short(devFilename, Parity.none, BaudRate.B9600);
-
-	Tid loggerTid = spawn(
-		(string outFilename)
-		{
-			bool shouldContinue = true;
-
-			File outFile = File(outFilename, "w");
-
-			while(shouldContinue)
-			{
-				receive(
-				(MainMessage message)
-				{
-					if(message.message != "END")
-					{
-						outFile.writeln(message.message);
-						outFile.flush();
-					}
-					else
-					{
-						shouldContinue = false;
-						outFile.close();
-					}
-				});
-			}
-		}, outFilename);
-
-	register(loggerTidName, loggerTid);
 
 	void showMenu()
 	{
@@ -309,7 +278,7 @@ void main(string[] args)
 					if(!puppeteer.isCommunicationEstablished)
 					{
 						writeln("Establishing communication with puppet...");
-						if(puppeteer.startCommunication())
+						if(puppeteer.startCommunication(loggingFilename))
 						{
 							writeln("Communication established.");
 						}
@@ -388,7 +357,6 @@ void main(string[] args)
 						writeln("Finishing communication with puppet...");
 						puppeteer.endCommunication();
 					}
-					loggerTid.send(MainMessage("END"));
 					break menu;
 
 				default:
@@ -411,12 +379,12 @@ class PuppetListener
 
 	void pinListenerMethod(ubyte pin, float value, long msecs) shared
 	{
-		locate(loggerTidName).send(MainMessage(to!string(msecs)~" => Pin "~to!string(pin)~" read "~to!string(value)));
+		//Dummy method
 	}
 
 	void varListenerMethod(VarType)(ubyte varIndex, VarType value, long msecs) shared
 	{
-		locate(loggerTidName).send(MainMessage(to!string(msecs)~" => Var "~to!string(varIndex)~ " of type " ~ VarType.stringof ~ " read "~to!string(value)));
+		//Dummy method
 	}
 
 	void addPinListener(ubyte pin)

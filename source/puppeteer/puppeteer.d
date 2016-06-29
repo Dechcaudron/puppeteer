@@ -1,7 +1,7 @@
 module puppeteer.puppeteer;
 
-import test.puppeteer.puppeteer_test : test;
-mixin test;
+//import test.puppeteer.puppeteer_test : test;
+//mixin test;
 
 public import puppeteer.serial.iserial_port;
 public import puppeteer.serial.baud_rate;
@@ -48,15 +48,15 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
     protected shared bool communicationOn;
 
-    string filename;
+    string devFilename;
     immutable Parity parity;
     immutable BaudRate baudRate;
 
     private Tid workerId;
 
-    public this(string filename, Parity parity = Parity.none, BaudRate baudRate = BaudRate.B9600)
+    public this(string devFilename, Parity parity = Parity.none, BaudRate baudRate = BaudRate.B9600)
     {
-        this.filename = filename;
+        this.devFilename = devFilename;
         this.parity = parity;
         this.baudRate = baudRate;
     }
@@ -190,11 +190,11 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         workerId.send(SetPWMMessage(pin, value));
     }
 
-    public bool startCommunication()
+    public bool startCommunication(string logFilename)
     {
         enforce!CommunicationException(!communicationOn);
 
-        workerId = spawn(&communicationLoop, filename, baudRate, parity);
+        workerId = spawn(&communicationLoop, devFilename, baudRate, parity, logFilename);
 
         auto msg = receiveOnly!CommunicationEstablishedMessage();
         return msg.success;
@@ -224,17 +224,17 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         return communicationOn;
     }
 
-    public bool saveConfig(string fileName)
+    public bool saveConfig(string targetPath)
     in
     {
-        assert(filename !is null);
-        assert(filename != "");
+        assert(targetPath !is null);
+        assert(targetPath != "");
     }
     body
     {
         string config = generateConfigString();
 
-        File f = File(fileName, "w");
+        File f = File(targetPath, "w");
         scope(exit) f.close();
 
         if(!f.isOpen)
@@ -244,15 +244,15 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         return true;
     }
 
-    public bool loadConfig(string fileName)
+    public bool loadConfig(string sourcePath)
     in
     {
-        assert(filename !is null);
-        assert(filename != "");
+        assert(sourcePath !is null);
+        assert(sourcePath != "");
     }
     body
     {
-        File f = File(fileName, "r");
+        File f = File(sourcePath, "r");
         scope(exit) f.close();
 
         if(!f.isOpen)
@@ -358,8 +358,12 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     }
 
 
-    private void communicationLoop(string fileName, immutable BaudRate baudRate, immutable Parity parity) shared
+    private void communicationLoop(string fileName, immutable BaudRate baudRate, immutable Parity parity, string logFilename) shared
     {
+        import puppeteer.logging.ipuppeteer_logger;
+        import puppeteer.logging.puppeteer_logger;
+        import puppeteer.logging.logging_exception;
+
         enum receiveTimeoutMs = 10;
         enum bytesReadAtOnce = 1;
 
@@ -368,6 +372,8 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         bool shouldContinue = true;
 
         ISerialPort arduinoSerialPort;
+        IPuppeteerLogger logger;
+        scope(exit) destroy(logger);
 
         void handlePinMonitorMessage(PinMonitorMessage msg)
         {
@@ -467,28 +473,30 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
                 ubyte pin = command[1];
 
+                enum arduinoAnalogReadMax = 1023;
+                enum arduinoAnalogReference = 5;
+                enum ubytePossibleValues = 256;
+
+                ushort readValue = command[2] * ubytePossibleValues + command[3];
+                float realValue =  arduinoAnalogReference * to!float(readValue) / arduinoAnalogReadMax;
+
+                float adaptedValue = realValue;
+
+                auto adapter = pin in analogInputValueAdapters;
+                if(adapter)
+                {
+                    adaptedValue = adapter.opCall(realValue);
+                }
+
+                logger.logAI(timer.peek().msecs, pin, realValue, adaptedValue);
+
                 auto signalWrapper = pin in pinSignalWrappers;
                 if(signalWrapper)
                 {
-                    enum arduinoAnalogReadMax = 1023;
-                    enum arduinoAnalogReference = 5;
-                    enum ubytePossibleValues = 256;
-
-                    ushort readValue = command[2] * ubytePossibleValues + command[3];
-                    float realValue =  arduinoAnalogReference * to!float(readValue) / arduinoAnalogReadMax;
-
-                    float adaptedValue = realValue;
-                    auto adapter = pin in analogInputValueAdapters;
-                    if(adapter)
-                    {
-                        adaptedValue = adapter.opCall(realValue);
-                    }
-
                     synchronized(*signalWrapper)
                     {
                         signalWrapper.emit(pin, adaptedValue, timer.peek().msecs);
                     }
-
                 }
                 else
                     debug(2) writeln("No listeners registered for pin ",pin);
@@ -544,7 +552,12 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
                             return data;
                     }
 
-                    emitData(varIndex, adaptData(decodeData!VarType(data)));
+                    auto readData = decodeData!VarType(data);
+                    auto adaptedData = adaptData(readData);
+
+                    logger.logVar(timer.peek().msecs, VarType.stringof, varIndex, to!string(readData), to!string(adaptedData));
+
+                    emitData(varIndex, adaptedData);
                 }
 
                 void delegate (ubyte, ubyte[]) selectDelegate(VarMonitorTypeCode typeCode)
@@ -680,6 +693,18 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         ownerTid.send(CommunicationEstablishedMessage(true));
         timer.start();
 
+        try
+        {
+            logger = new PuppeteerLogger(logFilename);
+        }
+        catch(LoggingException e)
+        {
+            debug writeln(e);
+            return;
+        }
+
+        logger.logInfo(timer.peek().msecs, "Puppeteer ready");
+
         do
         {
             ubyte[] readBytes = arduinoSerialPort.read(bytesReadAtOnce);
@@ -706,6 +731,8 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
         communicationOn = false;
         arduinoSerialPort.close();
+
+        logger.logInfo(timer.peek().msecs, "Puppeteer closing...");
 
         ownerTid.send(CommunicationEndedMessage());
     }
