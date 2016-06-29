@@ -7,6 +7,7 @@ import std.string;
 import std.format;
 
 import puppeteer.puppeteer;
+import dummy_listener;
 
 immutable string loggerTidName = "loggerTid";
 
@@ -47,7 +48,7 @@ void main(string[] args)
 			writeln(to!string(int(option)) ~ " - " ~ optionMsg);
 		}
 
-		PuppetListener listener = new PuppetListener(puppeteer);
+		auto listener = new DummyListener!short(puppeteer);
 
 		void addPinMonitor()
 		{
@@ -366,54 +367,4 @@ void main(string[] args)
 	}
 
 	showMenu();
-}
-
-class PuppetListener
-{
-	Puppeteer!short puppeteer;
-
-	this(Puppeteer!short puppeteer)
-	{
-		this.puppeteer = puppeteer;
-	}
-
-	void pinListenerMethod(ubyte pin, float value, long msecs) shared
-	{
-		//Dummy method
-	}
-
-	void varListenerMethod(VarType)(ubyte varIndex, VarType value, long msecs) shared
-	{
-		//Dummy method
-	}
-
-	void addPinListener(ubyte pin)
-	{
-		puppeteer.addPinListener(pin, &pinListenerMethod);
-	}
-
-	void removePinListener(ubyte pin)
-	{
-		puppeteer.removePinListener(pin, &pinListenerMethod);
-	}
-
-	void addVarListener(VarType)(ubyte varIndex)
-	{
-		puppeteer.addVariableListener(varIndex, &varListenerMethod!VarType);
-	}
-
-	void removeVarListener(VarType)(ubyte varIndex)
-	{
-		puppeteer.removeVariableListener(varIndex, &varListenerMethod!VarType);
-	}
-}
-
-struct MainMessage
-{
-	private string message;
-
-	this(string message)
-	{
-		this.message = message;
-	}
 }

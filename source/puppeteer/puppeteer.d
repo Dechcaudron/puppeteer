@@ -25,9 +25,13 @@ import std.exception;
 import core.time;
 import core.thread;
 
-public alias pinListenerDelegate = void delegate (ubyte, float, long) shared;
+public alias pinListenerDelegate = void delegate (ubyte, float, float, long) shared;
+private alias varMonitorDelegateType(VarType) = AliasSeq!(ubyte, VarType, VarType, long);
 
-private alias hack(alias a) = a;
+// Currently disabled due to not being able to be expanded into a function argument and then used from another type
+// Manually writing the delegate type as the function argument will have to do by now
+@disable
+public alias varMonitorDelegate(VarType) = void delegate (varMonitorDelegateType!VarType) shared;
 
 private enum configAIAdaptersKey = "AIAdapters";
 private enum configVarAdaptersKey = "VarAdapters";
@@ -35,7 +39,7 @@ private enum configVarAdaptersKey = "VarAdapters";
 class Puppeteer(VarMonitorTypes...)
 if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 {
-    alias PinSignalWrapper = SignalWrapper!(ubyte, float, long);
+    alias PinSignalWrapper = SignalWrapper!(ubyte, float, float, long);
 
     //Manually synchronized between both logical threads
     protected shared PinSignalWrapper[ubyte] pinSignalWrappers;
@@ -75,7 +79,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     public void setVarMonitorValueAdapter(T)(ubyte varIndex, string adapterExpression)
     if(canMonitor!T)
     {
-        setAdapter(hack!(mixin(getVarMonitorValueAdaptersName!T)), varIndex, adapterExpression);
+        setAdapter(Alias!(mixin(getVarMonitorValueAdaptersName!T)), varIndex, adapterExpression);
     }
 
     private void setAdapter(T)(ref shared ValueAdapter!T[ubyte] adapterDict, ubyte position, string adapterExpression)
@@ -142,11 +146,11 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         }
     }
 
-    public void addVariableListener(MonitorType)(ubyte varIndex, void delegate(ubyte, MonitorType, long) shared listener)
-    if(canMonitor!MonitorType)
+    public void addVariableListener(VarType)(ubyte varIndex, void delegate(ubyte, VarType, VarType, long) shared listener)
+    if(canMonitor!VarType)
     {
         enforce!CommunicationException(communicationOn);
-        alias typeSignalWrappers = hack!(mixin(getVarMonitorSignalWrappersName!MonitorType));
+        alias typeSignalWrappers = Alias!(mixin(getVarMonitorSignalWrappersName!VarType));
         auto wrapper = varIndex in typeSignalWrappers;
         if(wrapper)
         {
@@ -157,18 +161,19 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         }
         else
         {
-            auto signalWrapper = new shared SignalWrapper!(ubyte, MonitorType, long);
+            auto signalWrapper = new shared SignalWrapper!(varMonitorDelegateType!VarType);
             signalWrapper.addListener(listener);
             typeSignalWrappers[varIndex] = signalWrapper;
-                workerId.send(VarMonitorMessage(VarMonitorMessage.Action.start, varIndex, getVarMonitorTypeCode!MonitorType));
+
+            workerId.send(VarMonitorMessage(VarMonitorMessage.Action.start, varIndex, getVarMonitorTypeCode!VarType));
         }
     }
 
-    public void removeVariableListener(MonitorType)(ubyte varIndex, void delegate(ubyte, MonitorType, long) shared listener)
-    if(canMonitor!MonitorType)
+    public void removeVariableListener(VarType)(ubyte varIndex, void delegate(ubyte, VarType, VarType, long) shared listener)
+    if(canMonitor!VarType)
     {
         enforce!CommunicationException(communicationOn);
-        alias typeSignalWrappers = hack!(mixin(getVarMonitorSignalWrappersName!MonitorType));
+        alias typeSignalWrappers = Alias!(mixin(getVarMonitorSignalWrappersName!VarType));
 
         enforce(varIndex in typeSignalWrappers);
 
@@ -180,7 +185,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         if(signalWrapper.listenersNumber == 0)
         {
             typeSignalWrappers.remove(varIndex);
-            workerId.send(VarMonitorMessage(VarMonitorMessage.Action.stop, varIndex, getVarMonitorTypeCode!MonitorType));
+            workerId.send(VarMonitorMessage(VarMonitorMessage.Action.stop, varIndex, getVarMonitorTypeCode!VarType));
         }
     }
 
@@ -332,9 +337,9 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
         foreach(member; __traits(allMembers, VarMonitorTypeCode))
         {
-            static if(canMonitor!(getVarMonitorType!(hack!(mixin("VarMonitorTypeCode." ~ member)))))
+            static if(canMonitor!(getVarMonitorType!(Alias!(mixin("VarMonitorTypeCode." ~ member)))))
             {
-                alias varMonitorAdapters = hack!(mixin(getVarMonitorValueAdaptersName!(getVarMonitorType!(hack!(mixin("VarMonitorTypeCode." ~ member))))));
+                alias varMonitorAdapters = Alias!(mixin(getVarMonitorValueAdaptersName!(getVarMonitorType!(Alias!(mixin("VarMonitorTypeCode." ~ member))))));
 
                 if(varMonitorAdapters.length > 0)
                 {
@@ -477,8 +482,8 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
                 enum arduinoAnalogReference = 5;
                 enum ubytePossibleValues = 256;
 
-                ushort readValue = command[2] * ubytePossibleValues + command[3];
-                float realValue =  arduinoAnalogReference * to!float(readValue) / arduinoAnalogReadMax;
+                ushort encodedValue = command[2] * ubytePossibleValues + command[3];
+                float realValue =  arduinoAnalogReference * to!float(encodedValue) / arduinoAnalogReadMax;
 
                 float adaptedValue = realValue;
 
@@ -495,7 +500,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
                 {
                     synchronized(*signalWrapper)
                     {
-                        signalWrapper.emit(pin, adaptedValue, timer.peek().msecs);
+                        signalWrapper.emit(pin, realValue, adaptedValue, timer.peek().msecs);
                     }
                 }
                 else
@@ -516,9 +521,9 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
                 void handleData(VarType)(ubyte varIndex, ubyte[] data)
                 if(canMonitor!VarType)
                 {
-                    void emitData(VarType)(ubyte varIndex, VarType data)
+                    void emitData(VarType)(ubyte varIndex, VarType receivedData, VarType adaptedData)
                     {
-                        alias varTypeSignalWrappers = hack!(mixin(getVarMonitorSignalWrappersName!VarType));
+                        alias varTypeSignalWrappers = Alias!(mixin(getVarMonitorSignalWrappersName!VarType));
                         auto wrapper = varIndex in varTypeSignalWrappers;
 
                         if(wrapper)
@@ -527,7 +532,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
                             synchronized(signalWrapper)
                             {
-                                signalWrapper.emit(varIndex, data, timer.peek().msecs);
+                                signalWrapper.emit(varIndex, receivedData, adaptedData, timer.peek().msecs);
                             }
                         }
                         else
@@ -542,7 +547,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
                     VarType adaptData(VarType)(VarType data)
                     {
-                        alias typeAdapters = hack!(mixin(getVarMonitorValueAdaptersName!VarType));
+                        alias typeAdapters = Alias!(mixin(getVarMonitorValueAdaptersName!VarType));
 
                         auto adapter = varIndex in typeAdapters;
 
@@ -552,12 +557,12 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
                             return data;
                     }
 
-                    auto readData = decodeData!VarType(data);
-                    auto adaptedData = adaptData(readData);
+                    auto receivedData = decodeData!VarType(data);
+                    auto adaptedData = adaptData(receivedData);
 
-                    logger.logVar(timer.peek().msecs, VarType.stringof, varIndex, to!string(readData), to!string(adaptedData));
+                    logger.logVar(timer.peek().msecs, VarType.stringof, varIndex, to!string(receivedData), to!string(adaptedData));
 
-                    emitData(varIndex, adaptedData);
+                    emitData(varIndex, receivedData, adaptedData);
                 }
 
                 void delegate (ubyte, ubyte[]) selectDelegate(VarMonitorTypeCode typeCode)
@@ -868,14 +873,13 @@ unittest
 }
 
 
-private alias getVarMonitorTypeCode(VarType) = hack!(mixin(VarMonitorTypeCode.stringof ~ "." ~ VarType.stringof ~ "_t"));
+private alias getVarMonitorTypeCode(VarType) = Alias!(mixin(VarMonitorTypeCode.stringof ~ "." ~ VarType.stringof ~ "_t"));
 unittest
 {
     assert(getVarMonitorTypeCode!short == VarMonitorTypeCode.short_t);
 }
 
-private alias h(T) = T;
-private alias getVarMonitorType(VarMonitorTypeCode typeCode) = h!(mixin("h!(" ~ to!string(typeCode)[0..$-2] ~ ")"));
+private alias getVarMonitorType(VarMonitorTypeCode typeCode) = Alias!(mixin("Alias!(" ~ to!string(typeCode)[0..$-2] ~ ")"));
 unittest
 {
     with(VarMonitorTypeCode)
@@ -897,12 +901,12 @@ private pure string unrollVariableSignalWrappers(VarTypes...)()
 }
 
 
-private enum getVarMonitorSignalWrappersType(VarType) = "SignalWrapper!(ubyte, " ~ VarType.stringof ~ ", long)[ubyte]";
+private enum getVarMonitorSignalWrappersType(VarType) = "SignalWrapper!(ubyte, " ~ VarType.stringof ~ ", " ~ VarType.stringof ~ ", long)[ubyte]";
 unittest
 {
-    assert(getVarMonitorSignalWrappersType!int == "SignalWrapper!(ubyte, int, long)[ubyte]");
-    assert(getVarMonitorSignalWrappersType!float == "SignalWrapper!(ubyte, float, long)[ubyte]");
-    assert(getVarMonitorSignalWrappersType!byte == "SignalWrapper!(ubyte, byte, long)[ubyte]");
+    assert(getVarMonitorSignalWrappersType!int == "SignalWrapper!(ubyte, int, int, long)[ubyte]");
+    assert(getVarMonitorSignalWrappersType!float == "SignalWrapper!(ubyte, float, float, long)[ubyte]");
+    assert(getVarMonitorSignalWrappersType!byte == "SignalWrapper!(ubyte, byte, byte, long)[ubyte]");
 }
 
 
