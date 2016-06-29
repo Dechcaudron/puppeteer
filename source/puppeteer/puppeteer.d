@@ -1,7 +1,7 @@
 module puppeteer.puppeteer;
 
-//import test.puppeteer.puppeteer_test : test;
-//mixin test;
+import test.puppeteer.puppeteer_test : test;
+mixin test;
 
 public import puppeteer.serial.iserial_port;
 public import puppeteer.serial.baud_rate;
