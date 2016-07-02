@@ -23,7 +23,7 @@ void main(string[] args)
 	enforce(devFilename != "" && exists(devFilename), "Please select an existing device using --dev [devicePath]");
 
 	writeln("Opening device file " ~ devFilename);
-	auto puppeteer = new Puppeteer!short(devFilename, Parity.none, BaudRate.B9600);
+	auto puppeteer = new Puppeteer!short();
 
 	void showMenu()
 	{
@@ -147,7 +147,7 @@ void main(string[] args)
             }
 
             ubyte pin = to!ubyte(pinInput);
-            puppeteer.setAnalogInputValueAdapter(pin, expr);
+            puppeteer.setAIValueAdapter(pin, expr);
 
             writefln("Setting AI adapter for pin %s to f(x)=%s", pin, expr !is null ? expr : "x");
         }
@@ -279,7 +279,7 @@ void main(string[] args)
 					if(!puppeteer.isCommunicationEstablished)
 					{
 						writeln("Establishing communication with puppet...");
-						if(puppeteer.startCommunication(loggingFilename))
+						if(puppeteer.startCommunication(devFilename, BaudRate.B9600, Parity.none, loggingFilename))
 						{
 							writeln("Communication established.");
 						}

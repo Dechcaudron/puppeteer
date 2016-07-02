@@ -24,7 +24,7 @@ mixin template test()
             }
         }
 
-        auto a = new Puppeteer!short("fileName");
+        auto a = new Puppeteer!short();
         auto foo = new shared Foo;
 
         assertThrown!CommunicationException(a.endCommunication());
@@ -40,9 +40,9 @@ mixin template test()
         import std.file;
         import std.format : format;
 
-        auto a = new Puppeteer!short("filename");
-        a.setAnalogInputValueAdapter(0, "x");
-        a.setAnalogInputValueAdapter(3, "5+x");
+        auto a = new Puppeteer!short();
+        a.setAIValueAdapter(0, "x");
+        a.setAIValueAdapter(3, "5+x");
         a.setVarMonitorValueAdapter!short(1, "-x");
         a.setVarMonitorValueAdapter!short(5, "x-3");
 
@@ -63,24 +63,24 @@ mixin template test()
 
         assert(a.saveConfig(configFilename1));
 
-        auto b = new Puppeteer!short("filename");
+        auto b = new Puppeteer!short();
 
         b.loadConfig(configFilename1);
 
         assert(b.generateConfigString() == mockConfig.toPrettyString());
 
-        auto c = new Puppeteer!()("filename");
+        auto c = new Puppeteer!()();
         assertThrown!InvalidConfigurationException(c.loadConfig(configFilename1));
 
-        auto d = new Puppeteer!()("filename");
-        d.setAnalogInputValueAdapter(0, "2*x");
-        d.setAnalogInputValueAdapter(5, "-3*x");
+        auto d = new Puppeteer!()();
+        d.setAIValueAdapter(0, "2*x");
+        d.setAIValueAdapter(5, "-3*x");
 
         enum configFilename2 = testResDir ~ "/config2.test";
 
         assert(d.saveConfig(configFilename2));
 
-        auto e = new Puppeteer!short("filename");
+        auto e = new Puppeteer!short();
 
         assert(e.loadConfig(configFilename2));
 

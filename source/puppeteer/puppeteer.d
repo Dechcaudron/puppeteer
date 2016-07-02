@@ -45,29 +45,35 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     protected shared PinSignalWrapper[ubyte] pinSignalWrappers;
     protected shared mixin(unrollVariableSignalWrappers!VarMonitorTypes());
 
-    protected shared ValueAdapter!float[ubyte] analogInputValueAdapters;
+    protected shared ValueAdapter!float[ubyte] AIValueAdapters;
     protected shared mixin(unrollVariableValueAdapters!VarMonitorTypes());
 
     enum canMonitor(T) = __traits(compiles, mixin(getVarMonitorSignalWrappersName!T));
 
     protected shared bool communicationOn;
 
-    string devFilename;
-    immutable Parity parity;
-    immutable BaudRate baudRate;
-
     private Tid workerId;
 
-    public this(string devFilename, Parity parity = Parity.none, BaudRate baudRate = BaudRate.B9600)
+    public this()
     {
-        this.devFilename = devFilename;
-        this.parity = parity;
-        this.baudRate = baudRate;
+
     }
 
-    public void setAnalogInputValueAdapter(ubyte pin, string adapterExpression)
+    public void setAIValueAdapter(ubyte pin, string adapterExpression)
     {
-        setAdapter(analogInputValueAdapters, pin, adapterExpression);
+        setAdapter(AIValueAdapters, pin, adapterExpression);
+    }
+
+    public string getAIValueAdapter(ubyte pin)
+    {
+        if(pin in AIValueAdapters)
+        {
+            return AIValueAdapters[pin].expression;
+        }
+        else
+        {
+            return "";
+        }
     }
 
     /// Sets a value adapter for an internal variable of type T
@@ -79,7 +85,21 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     public void setVarMonitorValueAdapter(T)(ubyte varIndex, string adapterExpression)
     if(canMonitor!T)
     {
-        setAdapter(Alias!(mixin(getVarMonitorValueAdaptersName!T)), varIndex, adapterExpression);
+        alias adapterDict = Alias!(mixin(getVarMonitorValueAdaptersName!T));
+        setAdapter(adapterDict, varIndex, adapterExpression);
+    }
+
+    public string getVarMonitorValueAdapter(VarType)(ubyte varIndex)
+    if(canMonitor!VarType)
+    {
+        alias adapterDict = Alias!(mixin(getVarMonitorValueAdaptersName!VarType));
+
+        if(varIndex in adapterDict)
+        {
+            return adapterDict[varIndex].expression;
+        }
+        else
+            return "";
     }
 
     private void setAdapter(T)(ref shared ValueAdapter!T[ubyte] adapterDict, ubyte position, string adapterExpression)
@@ -195,7 +215,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         workerId.send(SetPWMMessage(pin, value));
     }
 
-    public bool startCommunication(string logFilename)
+    public bool startCommunication(string devFilename, BaudRate baudRate, Parity parity, string logFilename)
     {
         enforce!CommunicationException(!communicationOn);
 
@@ -237,6 +257,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     }
     body
     {
+        debug writeln("Trying to save configuration to " ~ targetPath);
         string config = generateConfigString();
 
         File f = File(targetPath, "w");
@@ -246,6 +267,8 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
             return false;
 
         f.write(config);
+
+        debug writeln("Success!");
         return true;
     }
 
@@ -257,6 +280,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     }
     body
     {
+        debug writeln("Trying to load configuration from path ",sourcePath);
         File f = File(sourcePath, "r");
         scope(exit) f.close();
 
@@ -267,6 +291,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         f.readf("%s", &content);
 
         applyConfig(content);
+        debug writeln("Success!");
 
         return true;
     }
@@ -281,7 +306,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
         foreach(string key, expr; aiAdapters)
         {
-            setAnalogInputValueAdapter(to!ubyte(key), expr.str);
+            setAIValueAdapter(to!ubyte(key), expr.str);
         }
 
         JSONValue varAdapters = top[configVarAdaptersKey].object;
@@ -326,7 +351,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         JSONValue config = JSONValue(emptyJson);
         JSONValue AIAdapters = JSONValue(emptyJson);
 
-        foreach(pin, adapter; analogInputValueAdapters)
+        foreach(pin, adapter; AIValueAdapters)
         {
             AIAdapters.object[to!string(pin)] = JSONValue(adapter.expression);
         }
@@ -487,7 +512,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
                 float adaptedValue = realValue;
 
-                auto adapter = pin in analogInputValueAdapters;
+                auto adapter = pin in AIValueAdapters;
                 if(adapter)
                 {
                     adaptedValue = adapter.opCall(realValue);
@@ -864,7 +889,7 @@ private enum VarMonitorTypeCode : byte
     short_t = 0x0,
 }
 
-private enum isVarMonitorTypeSupported(VarType) = __traits(compiles, getVarMonitorTypeCode!VarType);
+public enum isVarMonitorTypeSupported(VarType) = __traits(compiles, getVarMonitorTypeCode!VarType);
 unittest
 {
     assert(isVarMonitorTypeSupported!short);
