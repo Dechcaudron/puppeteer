@@ -36,6 +36,19 @@ mixin template test()
 
     unittest
     {
+        auto a = new Puppeteer!short();
+
+        assert(a.getPWMFromAverage!5(5) == 255);
+        assert(a.getPWMFromAverage!5(0) == 0);
+        assert(a.getPWMFromAverage!5(1) == 51);
+        assert(a.getPWMFromAverage!5(2) == 102);
+        assert(a.getPWMFromAverage!5(3) == 153);
+
+        assert(a.getPWMFromAverage!22(21) == 243);
+    }
+
+    unittest
+    {
         import std.json;
         import std.file;
         import std.format : format;

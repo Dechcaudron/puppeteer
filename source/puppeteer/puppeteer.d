@@ -215,6 +215,21 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         workerId.send(SetPWMMessage(pin, value));
     }
 
+    public void setPWMAverage(ubyte pin, float averageValue)
+    {
+        enum pwmHigh = 5;
+
+        enforce!CommunicationException(communicationOn);
+        workerId.send(SetPWMMessage(pin, getPWMFromAverage!pwmHigh(averageValue)));
+    }
+
+    private ubyte getPWMFromAverage(float pwmHigh)(float averageValue)
+    {
+        import std.math;
+
+        return to!ubyte(round(averageValue / pwmHigh * ubyte.max));
+    }
+
     public bool startCommunication(string devFilename, BaudRate baudRate, Parity parity, string logFilename)
     {
         enforce!CommunicationException(!communicationOn);
