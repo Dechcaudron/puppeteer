@@ -14,14 +14,9 @@ class PuppeteerLogger : IPuppeteerLogger
         logger = BasicLogger(logFilename);
     }
 
-    override void logAI(long timeMs, ubyte pin, float readValue, float adaptedValue)
+    void logSensor(long timeMs, string sensorName, string readValue, string adaptedValue)
     {
-        logger.log(format("%s:AI%s:%s:%s", timeMs, pin, readValue, adaptedValue));
-    }
-
-    void logVar(long timeMs, string varTypeName, ubyte varIndex, string readValue, string adaptedValue)
-    {
-        logger.log(format("%s:Var[%s]%s:%s:%s", timeMs, varTypeName, varIndex, readValue, adaptedValue));
+        logger.log(format("[%s]%s:%s:%s", timeMs, sensorName, readValue, adaptedValue));
     }
 
     void logInfo(long timeMs, string info)

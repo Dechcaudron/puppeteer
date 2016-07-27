@@ -48,6 +48,9 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     protected shared ValueAdapter!float[ubyte] AIValueAdapters;
     protected shared mixin(unrollVariableValueAdapters!VarMonitorTypes());
 
+    protected shared string[ubyte] AISensorNames;
+    protected shared mixin(unrollVarMonitorSensorNames!VarMonitorTypes());
+
     enum canMonitor(T) = __traits(compiles, mixin(getVarMonitorSignalWrappersName!T));
 
     protected shared bool communicationOn;
@@ -110,6 +113,66 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
             adapterDict.remove(position);
     }
 
+    public void setAISensorName(ubyte pin, string name)
+    {
+        setSensorName(AISensorNames, pin, name);
+    }
+
+    public string getAISensorName(ubyte pin) const
+    {
+        return getSensorName(AISensorNames, pin, "AI" ~ to!string(pin));
+    }
+
+    // shared copy
+    public string getAISensorName(ubyte pin) const shared
+    {
+        return getSensorName(AISensorNames, pin, "AI" ~ to!string(pin));
+    }
+
+    public void setVarMonitorSensorName(MonitorType)(ubyte position, string name)
+    if(canMonitor!MonitorType)
+    {
+        setSensorName(getVarMonitorSensorNames!MonitorType, position, name);
+    }
+
+    public string getVarMonitorSensorName(MonitorType)(ubyte position) const
+    if(canMonitor!MonitorType)
+    {
+        return getSensorName(mixin(Alias!(getVarMonitorSensorNames!MonitorType)), position, MonitorType.stringof ~ to!string(position));
+    }
+
+    // shared copy
+    public string getVarMonitorSensorNameShared(MonitorType)(ubyte position) const shared
+    if(canMonitor!MonitorType)
+    {
+        return getSensorName(mixin(Alias!(getVarMonitorSensorNames!MonitorType)), position, MonitorType.stringof ~ to!string(position));
+    }
+
+    private void setSensorName(ref shared string[ubyte] namesDict, ubyte position, string name)
+    {
+        if(name)
+            namesDict[position] = name;
+        else
+            namesDict.remove(position);
+    }
+
+    private string getSensorName(ref in shared string[ubyte] namesDict, ubyte position, string defaultName) const
+    {
+        if(position in namesDict)
+            return namesDict[position];
+        else
+            return defaultName;
+    }
+
+    // shared copy
+    private string getSensorName(ref in shared string[ubyte] namesDict, ubyte position, string defaultName) const shared
+    {
+        if(position in namesDict)
+            return namesDict[position];
+        else
+            return defaultName;
+    }
+
     public void addPinListener(ubyte pin, pinListenerDelegate listener)
     in
     {
@@ -142,7 +205,6 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
             }
         }
     }
-
 
     public void removePinListener(ubyte pin, pinListenerDelegate listener)
     in
@@ -533,7 +595,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
                     adaptedValue = adapter.opCall(realValue);
                 }
 
-                logger.logAI(timer.peek().msecs, pin, realValue, adaptedValue);
+                logger.logSensor(timer.peek().msecs, getAISensorName(pin), to!string(realValue), to!string(adaptedValue));
 
                 auto signalWrapper = pin in pinSignalWrappers;
                 if(signalWrapper)
@@ -600,7 +662,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
                     auto receivedData = decodeData!VarType(data);
                     auto adaptedData = adaptData(receivedData);
 
-                    logger.logVar(timer.peek().msecs, VarType.stringof, varIndex, to!string(receivedData), to!string(adaptedData));
+                    logger.logSensor(timer.peek().msecs, getVarMonitorSensorNameShared!VarType(varIndex), to!string(receivedData), to!string(adaptedData));
 
                     emitData(varIndex, receivedData, adaptedData);
                 }
@@ -971,3 +1033,17 @@ private pure string unrollVariableValueAdapters(VarTypes...)()
 
 private enum getVarMonitorValueAdaptersType(VarType) = "ValueAdapter!(" ~ VarType.stringof ~ ")[ubyte]";
 private enum getVarMonitorValueAdaptersName(VarType) = VarType.stringof ~ "ValueAdapters";
+
+private enum getVarMonitorSensorNames(VarType) = VarType.stringof ~ "SensorNames";
+
+private pure string unrollVarMonitorSensorNames(VarTypes...)()
+{
+    string unroll = "";
+
+    foreach(varType; VarTypes)
+    {
+        unroll ~= "string[ubyte] " ~ getVarMonitorSensorNames!varType ~ ";\n";
+    }
+
+    return unroll;
+}

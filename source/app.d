@@ -38,6 +38,8 @@ void main(string[] args)
 			pwm,
             setAIAdapter,
             setVarMonitorAdapter,
+			setAIName,
+			setVarMonitorName,
             saveConfig,
             loadConfig,
 			exit
@@ -169,6 +171,24 @@ void main(string[] args)
 
             writefln("Setting variable adapter for internal variable %s to f(x)=%s", varIndex, expr !is null ? expr : "x");
         }
+
+		void setAIName()
+		{
+			write("Analog Input sensor name [pin:name](<empty + Enter> to cancel): ");
+
+			string name;
+			int pin = -1;
+			string input = readln().chomp();
+			formattedRead(input, " %s:%s", &pin, &name);
+
+			if(pin == -1)
+			{
+				writeln("Sensor name setting has been cancelled.");
+				return;
+			}
+
+			puppeteer.setAISensorName()
+		}
 
         void saveConfigUI()
         {
