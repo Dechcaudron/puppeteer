@@ -38,8 +38,8 @@ void main(string[] args)
 			pwm,
             setAIAdapter,
             setVarMonitorAdapter,
-			setAIName,
-			setVarMonitorName,
+			setAISensorName,
+			setVarMonitorSensorName,
             saveConfig,
             loadConfig,
 			exit
@@ -172,22 +172,56 @@ void main(string[] args)
             writefln("Setting variable adapter for internal variable %s to f(x)=%s", varIndex, expr !is null ? expr : "x");
         }
 
-		void setAIName()
+		void setAISensorName()
 		{
 			write("Analog Input sensor name [pin:name](<empty + Enter> to cancel): ");
 
 			string name;
-			int pin = -1;
+			int pin;
 			string input = readln().chomp();
-			formattedRead(input, " %s:%s", &pin, &name);
 
-			if(pin == -1)
+			if(input.empty)
 			{
 				writeln("Sensor name setting has been cancelled.");
 				return;
 			}
 
-			puppeteer.setAISensorName()
+			formattedRead(input, " %s:%s", &pin, &name);
+
+			if(name.empty)
+			{
+				writeln("Reseting sensor name");
+				name = null;
+			}
+
+			puppeteer.setAISensorName(to!ubyte(pin), name);
+			writefln("AI %s sensor name set to %s", pin, puppeteer.getAISensorName(to!ubyte(pin)));
+		}
+
+		void setVarMonitorSensorName()
+		{
+			write("Variable Monitor sensor name [index:name](<empty + Enter> to cancel): ");
+
+			string name;
+			int index;
+			string input = readln().chomp();
+
+			if(input.empty)
+			{
+				writeln("Sensor name setting has been cancelled.");
+				return;
+			}
+
+			formattedRead(input, " %s:%s", &index, &name);
+
+			if(name.empty)
+			{
+				writeln("Reseting sensor name");
+				name = null;
+			}
+
+			puppeteer.setVarMonitorSensorName!short(to!ubyte(index), name);
+			writefln("Var Monitor %s sensor name set to %s", index, puppeteer.getVarMonitorSensorName!short(to!ubyte(index)));
 		}
 
         void saveConfigUI()
@@ -277,6 +311,8 @@ void main(string[] args)
 				printOption(pwm, "Set PWM output");
                 printOption(setAIAdapter, "Set AI value adapter");
                 printOption(setVarMonitorAdapter, "Set internal variable value adapter");
+				printOption(setAISensorName, "Set AI sensor name");
+				printOption(setVarMonitorSensorName, "Set Variable Monitor sensor name");
                 printOption(saveConfig, "Save puppeteer configuration");
                 printOption(loadConfig, "Load puppeteer configuration");
 				printOption(exit, "Exit");
@@ -363,6 +399,14 @@ void main(string[] args)
                 case Options.setVarMonitorAdapter:
                     setVarMonitorAdapter();
                     break;
+
+				case Options.setAISensorName:
+					setAISensorName();
+					break;
+
+				case Options.setVarMonitorSensorName:
+					setVarMonitorSensorName();
+					break;
 
                 case Options.saveConfig:
                     saveConfigUI();

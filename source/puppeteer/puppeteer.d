@@ -120,32 +120,32 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
     public string getAISensorName(ubyte pin) const
     {
-        return getSensorName(AISensorNames, pin, "AI" ~ to!string(pin));
+        return getSensorName(AISensorNames, pin, "AI(" ~ to!string(pin) ~ ")");
     }
 
     // shared copy
     public string getAISensorName(ubyte pin) const shared
     {
-        return getSensorName(AISensorNames, pin, "AI" ~ to!string(pin));
+        return getSensorName(AISensorNames, pin, "AI(" ~ to!string(pin) ~ ")");
     }
 
     public void setVarMonitorSensorName(MonitorType)(ubyte position, string name)
     if(canMonitor!MonitorType)
     {
-        setSensorName(getVarMonitorSensorNames!MonitorType, position, name);
+        setSensorName(mixin(getVarMonitorSensorNames!MonitorType), position, name);
     }
 
     public string getVarMonitorSensorName(MonitorType)(ubyte position) const
     if(canMonitor!MonitorType)
     {
-        return getSensorName(mixin(Alias!(getVarMonitorSensorNames!MonitorType)), position, MonitorType.stringof ~ to!string(position));
+        return getSensorName(mixin(getVarMonitorSensorNames!MonitorType), position, varMonitorSensorDefaultName!MonitorType ~ "(" ~ to!string(position) ~ ")");
     }
 
     // shared copy
-    public string getVarMonitorSensorNameShared(MonitorType)(ubyte position) const shared
+    public string getVarMonitorSensorName(MonitorType)(ubyte position) const shared
     if(canMonitor!MonitorType)
     {
-        return getSensorName(mixin(Alias!(getVarMonitorSensorNames!MonitorType)), position, MonitorType.stringof ~ to!string(position));
+        return getSensorName(mixin(getVarMonitorSensorNames!MonitorType), position, varMonitorSensorDefaultName!MonitorType ~ "(" ~ to!string(position) ~ ")");
     }
 
     private void setSensorName(ref shared string[ubyte] namesDict, ubyte position, string name)
@@ -662,7 +662,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
                     auto receivedData = decodeData!VarType(data);
                     auto adaptedData = adaptData(receivedData);
 
-                    logger.logSensor(timer.peek().msecs, getVarMonitorSensorNameShared!VarType(varIndex), to!string(receivedData), to!string(adaptedData));
+                    logger.logSensor(timer.peek().msecs, this.getVarMonitorSensorName!VarType(varIndex), to!string(receivedData), to!string(adaptedData));
 
                     emitData(varIndex, receivedData, adaptedData);
                 }
@@ -966,7 +966,7 @@ private enum VarMonitorTypeCode : byte
     short_t = 0x0,
 }
 
-public enum isVarMonitorTypeSupported(VarType) = __traits(compiles, getVarMonitorTypeCode!VarType);
+public enum isVarMonitorTypeSupported(VarType) = __traits(compiles, getVarMonitorTypeCode!VarType) && __traits(compiles, varMonitorSensorDefaultName!VarType);
 unittest
 {
     assert(isVarMonitorTypeSupported!short);
@@ -974,11 +974,21 @@ unittest
     assert(!isVarMonitorTypeSupported!void);
 }
 
-
 private alias getVarMonitorTypeCode(VarType) = Alias!(mixin(VarMonitorTypeCode.stringof ~ "." ~ VarType.stringof ~ "_t"));
 unittest
 {
     assert(getVarMonitorTypeCode!short == VarMonitorTypeCode.short_t);
+}
+
+private enum VarMonitorSensorDefaultName
+{
+    _short = "Int16"
+}
+
+private alias varMonitorSensorDefaultName(VarMonitorType) = Alias!(mixin(VarMonitorSensorDefaultName.stringof ~ "._" ~ VarMonitorType.stringof));
+unittest
+{
+    assert(varMonitorSensorDefaultName!short == VarMonitorSensorDefaultName._short);
 }
 
 private alias getVarMonitorType(VarMonitorTypeCode typeCode) = Alias!(mixin("Alias!(" ~ to!string(typeCode)[0..$-2] ~ ")"));
