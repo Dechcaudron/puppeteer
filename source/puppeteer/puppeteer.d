@@ -33,9 +33,6 @@ private alias varMonitorDelegateType(VarType) = AliasSeq!(ubyte, VarType, VarTyp
 @disable
 public alias varMonitorDelegate(VarType) = void delegate (varMonitorDelegateType!VarType) shared;
 
-private enum configAIAdaptersKey = "AIAdapters";
-private enum configVarAdaptersKey = "VarAdapters";
-
 class Puppeteer(VarMonitorTypes...)
 if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 {
@@ -45,133 +42,19 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     protected shared PinSignalWrapper[ubyte] pinSignalWrappers;
     protected shared mixin(unrollVariableSignalWrappers!VarMonitorTypes());
 
-    protected shared ValueAdapter!float[ubyte] AIValueAdapters;
-    protected shared mixin(unrollVariableValueAdapters!VarMonitorTypes());
+    protected shared PuppeteerConfig!VarMonitorTypes config;
 
-    protected shared string[ubyte] AISensorNames;
-    protected shared mixin(unrollVarMonitorSensorNames!VarMonitorTypes());
+    @property
+    shared PuppeteerConfig!VarMonitorTypes config()
+    {
+        return config;
+    }
 
     enum canMonitor(T) = __traits(compiles, mixin(getVarMonitorSignalWrappersName!T));
 
     protected shared bool communicationOn;
 
     private Tid workerId;
-
-    public this()
-    {
-
-    }
-
-    public void setAIValueAdapter(ubyte pin, string adapterExpression)
-    {
-        setAdapter(AIValueAdapters, pin, adapterExpression);
-    }
-
-    public string getAIValueAdapter(ubyte pin)
-    {
-        if(pin in AIValueAdapters)
-        {
-            return AIValueAdapters[pin].expression;
-        }
-        else
-        {
-            return "";
-        }
-    }
-
-    /// Sets a value adapter for an internal variable of type T
-    ///
-    /// Params:
-    ///
-    /// varIndex          =
-    /// adapterExpression =
-    public void setVarMonitorValueAdapter(T)(ubyte varIndex, string adapterExpression)
-    if(canMonitor!T)
-    {
-        alias adapterDict = Alias!(mixin(getVarMonitorValueAdaptersName!T));
-        setAdapter(adapterDict, varIndex, adapterExpression);
-    }
-
-    public string getVarMonitorValueAdapter(VarType)(ubyte varIndex)
-    if(canMonitor!VarType)
-    {
-        alias adapterDict = Alias!(mixin(getVarMonitorValueAdaptersName!VarType));
-
-        if(varIndex in adapterDict)
-        {
-            return adapterDict[varIndex].expression;
-        }
-        else
-            return "";
-    }
-
-    private void setAdapter(T)(ref shared ValueAdapter!T[ubyte] adapterDict, ubyte position, string adapterExpression)
-    {
-        if(adapterExpression)
-            adapterDict[position] = shared ValueAdapter!T(adapterExpression);
-        else
-            adapterDict.remove(position);
-    }
-
-    public void setAISensorName(ubyte pin, string name)
-    {
-        setSensorName(AISensorNames, pin, name);
-    }
-
-    public string getAISensorName(ubyte pin) const
-    {
-        return getSensorName(AISensorNames, pin, "AI(" ~ to!string(pin) ~ ")");
-    }
-
-    // shared copy
-    public string getAISensorName(ubyte pin) const shared
-    {
-        return getSensorName(AISensorNames, pin, "AI(" ~ to!string(pin) ~ ")");
-    }
-
-    public void setVarMonitorSensorName(MonitorType)(ubyte position, string name)
-    if(canMonitor!MonitorType)
-    {
-        setSensorName(mixin(getVarMonitorSensorNames!MonitorType), position, name);
-    }
-
-    public string getVarMonitorSensorName(MonitorType)(ubyte position) const
-    if(canMonitor!MonitorType)
-    {
-        return getSensorName(mixin(getVarMonitorSensorNames!MonitorType), position, varMonitorSensorDefaultName!MonitorType ~ "(" ~ to!string(position) ~ ")");
-    }
-
-    // shared copy
-    public string getVarMonitorSensorName(MonitorType)(ubyte position) const shared
-    if(canMonitor!MonitorType)
-    {
-        return getSensorName(mixin(getVarMonitorSensorNames!MonitorType), position, varMonitorSensorDefaultName!MonitorType ~ "(" ~ to!string(position) ~ ")");
-    }
-
-    private void setSensorName(ref shared string[ubyte] namesDict, ubyte position, string name)
-    {
-        if(name)
-            namesDict[position] = name;
-        else
-            namesDict.remove(position);
-    }
-
-    private string getSensorName(ref in shared string[ubyte] namesDict, ubyte position, string defaultName) const
-    {
-        if(position in namesDict)
-            return namesDict[position];
-        else
-            return defaultName;
-    }
-
-    // shared copy
-    private string getSensorName(ref in shared string[ubyte] namesDict, ubyte position, string defaultName) const shared
-    {
-        if(position in namesDict)
-            return namesDict[position];
-        else
-            return defaultName;
-    }
 
     public void addPinListener(ubyte pin, pinListenerDelegate listener)
     in
@@ -913,91 +796,6 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
             this.value = value;
         }
     }
-
-
-}
-
-private shared struct ValueAdapter(T)
-{
-    import arith_eval.evaluable;
-
-    private Evaluable!(T, "x") evaluable;
-    private string expression;
-
-    this(string xBasedValueAdapterExpr)
-    {
-        try
-        {
-            evaluable = Evaluable!(T,"x")(xBasedValueAdapterExpr);
-        }
-        catch(InvalidExpressionException e)
-        {
-            throw new InvalidAdapterExpressionException("Can't create ValueAdapter with expression " ~ xBasedValueAdapterExpr);
-        }
-
-        expression = xBasedValueAdapterExpr;
-    }
-
-    T opCall(T value) const
-    {
-        return evaluable(value);
-    }
-}
-unittest
-{
-    auto a = shared ValueAdapter!float("x / 3");
-    assert(a(3) == 1.0f);
-    assert(a(1) == 1.0f / 3);
-
-    auto b = shared ValueAdapter!float("x**2 + 1");
-    assert(b(3) == 10.0f);
-    assert(b(5) == 26.0f);
-
-    b = shared ValueAdapter!float("x");
-    assert(b(1) == 1f);
-
-    auto c = shared ValueAdapter!int("x * 3");
-    assert(c(3) == 9);
-
-}
-
-private enum VarMonitorTypeCode : byte
-{
-    short_t = 0x0,
-}
-
-public enum isVarMonitorTypeSupported(VarType) = __traits(compiles, getVarMonitorTypeCode!VarType) && __traits(compiles, varMonitorSensorDefaultName!VarType);
-unittest
-{
-    assert(isVarMonitorTypeSupported!short);
-    assert(!isVarMonitorTypeSupported!float);
-    assert(!isVarMonitorTypeSupported!void);
-}
-
-private alias getVarMonitorTypeCode(VarType) = Alias!(mixin(VarMonitorTypeCode.stringof ~ "." ~ VarType.stringof ~ "_t"));
-unittest
-{
-    assert(getVarMonitorTypeCode!short == VarMonitorTypeCode.short_t);
-}
-
-private enum VarMonitorSensorDefaultName
-{
-    _short = "Int16"
-}
-
-private alias varMonitorSensorDefaultName(VarMonitorType) = Alias!(mixin(VarMonitorSensorDefaultName.stringof ~ "._" ~ VarMonitorType.stringof));
-unittest
-{
-    assert(varMonitorSensorDefaultName!short == VarMonitorSensorDefaultName._short);
-}
-
-private alias getVarMonitorType(VarMonitorTypeCode typeCode) = Alias!(mixin("Alias!(" ~ to!string(typeCode)[0..$-2] ~ ")"));
-unittest
-{
-    with(VarMonitorTypeCode)
-    {
-        assert(is(getVarMonitorType!short_t == short));
-    }
 }
 
 private pure string unrollVariableSignalWrappers(VarTypes...)()
@@ -1026,34 +824,4 @@ private enum getVarMonitorSignalWrappersName(VarType) = VarType.stringof ~ "Sign
 unittest
 {
     assert(getVarMonitorSignalWrappersName!int == "intSignalWrappers");
-}
-
-
-private pure string unrollVariableValueAdapters(VarTypes...)()
-{
-    string unroll = "";
-
-    foreach(varType; VarTypes)
-    {
-        unroll ~= getVarMonitorValueAdaptersType!varType ~ " " ~ getVarMonitorValueAdaptersName!varType ~ ";\n";
-    }
-
-    return unroll;
-}
-
-private enum getVarMonitorValueAdaptersType(VarType) = "ValueAdapter!(" ~ VarType.stringof ~ ")[ubyte]";
-private enum getVarMonitorValueAdaptersName(VarType) = VarType.stringof ~ "ValueAdapters";
-
-private enum getVarMonitorSensorNames(VarType) = VarType.stringof ~ "SensorNames";
-
-private pure string unrollVarMonitorSensorNames(VarTypes...)()
-{
-    string unroll = "";
-
-    foreach(varType; VarTypes)
-    {
-        unroll ~= "string[ubyte] " ~ getVarMonitorSensorNames!varType ~ ";\n";
-    }
-
-    return unroll;
 }
