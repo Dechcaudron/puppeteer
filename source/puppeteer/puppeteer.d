@@ -9,8 +9,10 @@ public import puppeteer.serial.parity;
 
 import puppeteer.signal_wrapper;
 import puppeteer.exception.invalid_adapter_expression_exception;
-import puppeteer.exception.invalid_configuration_exception;
-import puppeteer.exception.communication_exception;
+import puppeteer.communicator;
+import puppeteer.var_monitor_utils;
+import puppeteer.puppeteer_config;
+import puppeteer.logging.ipuppeteer_logger;
 
 import std.stdio;
 import std.concurrency;
@@ -33,7 +35,7 @@ private alias varMonitorDelegateType(VarType) = AliasSeq!(ubyte, VarType, VarTyp
 @disable
 public alias varMonitorDelegate(VarType) = void delegate (varMonitorDelegateType!VarType) shared;
 
-class Puppeteer(VarMonitorTypes...)
+shared class Puppeteer(VarMonitorTypes...)
 if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 {
     alias PinSignalWrapper = SignalWrapper!(ubyte, float, float, long);
@@ -42,19 +44,28 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     protected shared PinSignalWrapper[ubyte] pinSignalWrappers;
     protected shared mixin(unrollVariableSignalWrappers!VarMonitorTypes());
 
-    protected shared PuppeteerConfig!VarMonitorTypes config;
+    protected Communicator!VarMonitorTypes communicator;
+
+    protected PuppeteerConfig!VarMonitorTypes config;
 
     @property
-    shared PuppeteerConfig!VarMonitorTypes config()
+    shared(PuppeteerConfig!VarMonitorTypes) configuration()
     {
         return config;
     }
 
     enum canMonitor(T) = __traits(compiles, mixin(getVarMonitorSignalWrappersName!T));
 
-    protected shared bool communicationOn;
+    @property
+    bool isCommunicationEstablished()
+    {
+        return communicator.isCommunicationEstablished;
+    }
 
-    private Tid workerId;
+    this(shared Communicator!VarMonitorTypes communicator)
+    {
+        this.communicator = communicator;
+    }
 
     public void addPinListener(ubyte pin, pinListenerDelegate listener)
     in
@@ -63,8 +74,6 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     }
     body
     {
-        enforce!CommunicationException(communicationOn);
-
         auto wrapper = pin in pinSignalWrappers;
         if(!wrapper)
         {
@@ -75,8 +84,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
             //No need to synchronize this call since it is the first listener
             signalWrapper.addListener(listener);
 
-            debug writeln("Sending message to dynamically enable monitoring of pin "~to!string(pin));
-            workerId.send(PinMonitorMessage(PinMonitorMessage.Action.start, pin));
+            communicator.changeAIMonitorStatus(pin, true);
         }
         else
         {
@@ -96,7 +104,6 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     }
     body
     {
-        enforce!CommunicationException(communicationOn);
         enforce(pin in pinSignalWrappers);
 
         shared PinSignalWrapper signalWrapper = pinSignalWrappers[pin];
@@ -107,14 +114,18 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         if(signalWrapper.listenersNumber == 0)
         {
             pinSignalWrappers.remove(pin);
-            workerId.send(PinMonitorMessage(PinMonitorMessage.Action.stop, pin));
+            communicator.changeAIMonitorStatus(pin, false);
         }
     }
 
     public void addVariableListener(VarType)(ubyte varIndex, void delegate(ubyte, VarType, VarType, long) shared listener)
     if(canMonitor!VarType)
+    in
     {
-        enforce!CommunicationException(communicationOn);
+        assert(listener !is null);
+    }
+    body
+    {
         alias typeSignalWrappers = Alias!(mixin(getVarMonitorSignalWrappersName!VarType));
         auto wrapper = varIndex in typeSignalWrappers;
         if(wrapper)
@@ -130,14 +141,18 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
             signalWrapper.addListener(listener);
             typeSignalWrappers[varIndex] = signalWrapper;
 
-            workerId.send(VarMonitorMessage(VarMonitorMessage.Action.start, varIndex, getVarMonitorTypeCode!VarType));
+            communicator.changeVarMonitorStatus!VarType(varIndex, true);
         }
     }
 
     public void removeVariableListener(VarType)(ubyte varIndex, void delegate(ubyte, VarType, VarType, long) shared listener)
     if(canMonitor!VarType)
+    in
     {
-        enforce!CommunicationException(communicationOn);
+        assert(listener !is null);
+    }
+    body
+    {
         alias typeSignalWrappers = Alias!(mixin(getVarMonitorSignalWrappersName!VarType));
 
         enforce(varIndex in typeSignalWrappers);
@@ -150,46 +165,35 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         if(signalWrapper.listenersNumber == 0)
         {
             typeSignalWrappers.remove(varIndex);
-            workerId.send(VarMonitorMessage(VarMonitorMessage.Action.stop, varIndex, getVarMonitorTypeCode!VarType));
+            communicator.changeVarMonitorStatus!VarType(varIndex, false);
         }
     }
 
     public void setPWM(ubyte pin, ubyte value)
     {
-        enforce!CommunicationException(communicationOn);
-        workerId.send(SetPWMMessage(pin, value));
+        communicator.setPWMValue(pin, value);
     }
 
     public void setPWMAverage(ubyte pin, float averageValue)
     {
         enum pwmHigh = 5;
-
-        enforce!CommunicationException(communicationOn);
-        workerId.send(SetPWMMessage(pin, getPWMFromAverage!pwmHigh(averageValue)));
+        setPWM(pin, getPWMFromAverage!pwmHigh(averageValue));
     }
 
     private ubyte getPWMFromAverage(float pwmHigh)(float averageValue)
     {
         import std.math;
-
         return to!ubyte(round(averageValue / pwmHigh * ubyte.max));
     }
 
     public bool startCommunication(string devFilename, BaudRate baudRate, Parity parity, string logFilename)
     {
-        enforce!CommunicationException(!communicationOn);
-
-        workerId = spawn(&communicationLoop, devFilename, baudRate, parity, logFilename);
-
-        auto msg = receiveOnly!CommunicationEstablishedMessage();
-        return msg.success;
+        communicator.startCommunication(devFilename, baudRate, parity, logFilename);
     }
 
     public void endCommunication()
     {
-        enforce!CommunicationException(communicationOn);
-
-        workerId.send(EndCommunicationMessage());
+        communicator.endCommunication();
 
         //Remove all listeners
         foreach(pin; pinSignalWrappers.byKey())
@@ -199,602 +203,66 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         }
 
         //TODO: remove listeners for variables as well
-
-        receiveOnly!CommunicationEndedMessage();
     }
 
-    @property
-    bool isCommunicationEstablished()
+    package void emitAIRead(byte pin, float readValue, long readMilliseconds)
     {
-        return communicationOn;
+        float adaptedValue;
+
+        auto adapter = pin in AIValueAdapters;
+        if(adapter)
+        {
+            adaptedValue = adapter(realValue);
+        }
+        else
+        {
+            adaptedValue = readValue;
+        }
+
+        auto signalWrapper = pin in pinSignalWrappers;
+        if(signalWrapper)
+        {
+            synchronized(*signalWrapper)
+            {
+                signalWrapper.emit(pin, readValue, adaptedValue, timer.peek().msecs);
+            }
+        }
+        else
+            debug(2) writeln("No listeners registered for pin ",pin);
+
+        logger.logSensor(timer.peek().msecs, getAISensorName(pin), to!string(realValue), to!string(adaptedValue));
     }
 
-    public bool saveConfig(string targetPath)
-    in
+    package void emitVarRead(VarMonitorType)(byte varIndex, VarMonitorType readValue, long readMilliseconds)
+    if(canMonitor!VarMonitorType)
     {
-        assert(targetPath !is null);
-        assert(targetPath != "");
-    }
-    body
-    {
-        debug writeln("Trying to save configuration to " ~ targetPath);
-        string config = generateConfigString();
+        VarMonitorType adaptedValue;
 
-        File f = File(targetPath, "w");
-        scope(exit) f.close();
-
-        if(!f.isOpen)
-            return false;
-
-        f.write(config);
-
-        debug writeln("Success!");
-        return true;
-    }
-
-    public bool loadConfig(string sourcePath)
-    in
-    {
-        assert(sourcePath !is null);
-        assert(sourcePath != "");
-    }
-    body
-    {
-        debug writeln("Trying to load configuration from path ",sourcePath);
-        File f = File(sourcePath, "r");
-        scope(exit) f.close();
-
-        if(!f.isOpen)
-            return false;
-
-        string content;
-        f.readf("%s", &content);
-
-        applyConfig(content);
-        debug writeln("Success!");
-
-        return true;
-    }
-
-    package void applyConfig(string configStr)
-    {
-        import std.json;
-
-        JSONValue top = parseJSON(configStr);
-
-        JSONValue aiAdapters = top[configAIAdaptersKey].object;
-
-        foreach(string key, expr; aiAdapters)
+        // Adapt value
         {
-            setAIValueAdapter(to!ubyte(key), expr.str);
+            alias typeAdapters = Alias!(mixin(getVarMonitorValueAdaptersName!VarType));
+
+            auto adapter = varIndex in typeAdapters;
+            if(adapter)
+                adaptedValue = adapter(readValue);
+            else
+                adaptedValue = readValue;
         }
 
-        JSONValue varAdapters = top[configVarAdaptersKey].object;
+        alias varTypeSignalWrappers = Alias!(mixin(getVarMonitorSignalWrappersName!VarMonitorType));
 
-        void setVarMonitorAdapterDynamic(string typeName, ubyte varIndex, string expr)
+        auto wrapper = varIndex in varTypeSignalWrappers;
+        if(wrapper)
         {
-            string generateSwitch()
+            synchronized(*signalWrapper)
             {
-                string str = "switch(typeName) {";
-
-                foreach(t; VarMonitorTypes)
-                {
-                    str ~= "case \"" ~ t.stringof ~ "\":";
-                    str ~= "setVarMonitorValueAdapter!" ~ t.stringof ~ "(varIndex, expr);";
-                    str ~= "break;";
-                }
-
-                str ~= "default: throw new InvalidConfigurationException(\"Type \" ~ typeName ~ \" is not supported by this Puppeteer\");";
-                str ~= "}";
-
-                return str;
-            }
-
-            mixin(generateSwitch());
-        }
-
-        foreach(string typeName, innerJson; varAdapters)
-        {
-            foreach(string varIndex, expr; innerJson)
-            {
-                setVarMonitorAdapterDynamic(typeName, to!ubyte(varIndex), expr.str);
+                signalWrapper.emit(varIndex, readValue, adaptedData, readMilliseconds);
             }
         }
-    }
+        else
+            debug(2) writeln("SignalWrapper for type ", VarType.stringof, "and varIndex ", varIndex, "was no longer in its SignalWrapper assoc array. Skipping signal emission.");
 
-    private string generateConfigString()
-    {
-        import std.json;
-
-        enum emptyJson = string[string].init;
-
-        JSONValue config = JSONValue(emptyJson);
-        JSONValue AIAdapters = JSONValue(emptyJson);
-
-        foreach(pin, adapter; AIValueAdapters)
-        {
-            AIAdapters.object[to!string(pin)] = JSONValue(adapter.expression);
-        }
-
-        config.object[configAIAdaptersKey] = AIAdapters;
-
-        JSONValue varAdapters = JSONValue(emptyJson);
-
-        foreach(member; __traits(allMembers, VarMonitorTypeCode))
-        {
-            static if(canMonitor!(getVarMonitorType!(Alias!(mixin("VarMonitorTypeCode." ~ member)))))
-            {
-                alias varMonitorAdapters = Alias!(mixin(getVarMonitorValueAdaptersName!(getVarMonitorType!(Alias!(mixin("VarMonitorTypeCode." ~ member))))));
-
-                if(varMonitorAdapters.length > 0)
-                {
-                    string typeName = member[0 .. $-2];
-
-                    JSONValue typeMonitorAdaptersJSON = JSONValue(emptyJson);
-
-                    foreach(varIndex, adapter; varMonitorAdapters)
-                    {
-                        typeMonitorAdaptersJSON.object[to!string(varIndex)] = JSONValue(adapter.expression);
-                    }
-
-                    varAdapters.object[typeName] = typeMonitorAdaptersJSON;
-                }
-            }
-        }
-
-        config.object[configVarAdaptersKey] = varAdapters;
-
-        return config.toPrettyString();
-    }
-
-
-    private void communicationLoop(string fileName, immutable BaudRate baudRate, immutable Parity parity, string logFilename) shared
-    {
-        import puppeteer.logging.ipuppeteer_logger;
-        import puppeteer.logging.puppeteer_logger;
-        import puppeteer.logging.logging_exception;
-
-        enum receiveTimeoutMs = 10;
-        enum bytesReadAtOnce = 1;
-
-        enum ubyte commandControlByte = 0xff;
-
-        bool shouldContinue = true;
-
-        ISerialPort arduinoSerialPort;
-        IPuppeteerLogger logger;
-        scope(exit) destroy(logger);
-
-        void handlePinMonitorMessage(PinMonitorMessage msg)
-        {
-            void sendStartMonitoringPinCmd(ISerialPort serialPort, ubyte pin)
-            {
-                debug writeln("Sending startMonitoringCommand for pin "~to!string(pin));
-                serialPort.write([commandControlByte, 0x01, pin]);
-            }
-
-            void sendStopMonitoringPinCmd(ISerialPort serialPort, ubyte pin)
-            {
-                debug writeln("Sending stopMonitoringCommand for pin "~to!string(pin));
-                serialPort.write([commandControlByte, 0x02, pin]);
-            }
-
-            final switch(msg.action) with (PinMonitorMessage.Action)
-            {
-                case start:
-                    sendStartMonitoringPinCmd(arduinoSerialPort, msg.pin);
-                    break;
-
-                case stop:
-                    sendStopMonitoringPinCmd(arduinoSerialPort, msg.pin);
-                    break;
-            }
-        }
-
-        void handleEndCommunicationMessage(EndCommunicationMessage msg)
-        {
-            shouldContinue = false;
-        }
-
-        void handleVarMonitorMessage(VarMonitorMessage msg)
-        {
-            void sendStartMonitoringVariableCmd(ISerialPort serialPort, VarMonitorTypeCode typeCode, byte varIndex)
-            {
-                debug writeln("Sending startMonitoringVariableCommand for type ", typeCode, " and index ", varIndex);
-                serialPort.write([commandControlByte, 0x05, typeCode, varIndex]);
-            }
-
-            void sendStopMonitoringVariableCmd(ISerialPort serialPort, VarMonitorTypeCode typeCode, byte varIndex)
-            {
-                debug writeln("Sending stopMonitoringVariableCommand for type ", typeCode, " and index ", varIndex);
-                serialPort.write([commandControlByte, 0x06, typeCode, varIndex]);
-            }
-
-            final switch(msg.action) with (VarMonitorMessage.Action)
-            {
-                case start:
-                    sendStartMonitoringVariableCmd(arduinoSerialPort, msg.varTypeCode, msg.varIndex);
-                    break;
-
-                case stop:
-                    sendStopMonitoringVariableCmd(arduinoSerialPort, msg.varTypeCode, msg.varIndex);
-                    break;
-            }
-        }
-
-        void handleSetPWMMessage(SetPWMMessage msg)
-        {
-            void sendSetPWMCmd(ISerialPort serialPort, ubyte pin, ubyte value)
-            {
-                debug writeln("Sending setPWMCommand for pin "~to!string(pin)~" and value "~to!string(value));
-                serialPort.write([commandControlByte, 0x04, pin, value]);
-            }
-
-            sendSetPWMCmd(arduinoSerialPort, msg.pin, msg.value);
-        }
-
-        StopWatch timer;
-
-        void handleReadBytes(ubyte[] readBytes)
-        in
-        {
-            assert(readBytes !is null);
-            assert(readBytes.length != 0);
-        }
-        body
-        {
-            enum ReadCommands : ubyte
-            {
-                analogMonitor = 0x1,
-                varMonitor = 0x2,
-                error = 0xfe
-            }
-
-            void handleAnalogMonitorCommand(ubyte[] command)
-            in
-            {
-                assert(command !is null);
-                assert(command.length == 4);
-                assert(command[0] == ReadCommands.analogMonitor);
-            }
-            body
-            {
-                debug(2) writeln("Handling analogMonitorCommand ", command);
-
-                ubyte pin = command[1];
-
-                enum arduinoAnalogReadMax = 1023;
-                enum arduinoAnalogReference = 5;
-                enum ubytePossibleValues = 256;
-
-                ushort encodedValue = command[2] * ubytePossibleValues + command[3];
-                float realValue =  arduinoAnalogReference * to!float(encodedValue) / arduinoAnalogReadMax;
-
-                float adaptedValue = realValue;
-
-                auto adapter = pin in AIValueAdapters;
-                if(adapter)
-                {
-                    adaptedValue = adapter.opCall(realValue);
-                }
-
-                logger.logSensor(timer.peek().msecs, getAISensorName(pin), to!string(realValue), to!string(adaptedValue));
-
-                auto signalWrapper = pin in pinSignalWrappers;
-                if(signalWrapper)
-                {
-                    synchronized(*signalWrapper)
-                    {
-                        signalWrapper.emit(pin, realValue, adaptedValue, timer.peek().msecs);
-                    }
-                }
-                else
-                    debug(2) writeln("No listeners registered for pin ",pin);
-            }
-
-            void handleVarMonitorCommand(ubyte[] command)
-            in
-            {
-                assert(command !is null);
-                assert(command.length == 5);
-                assert(command[0] == ReadCommands.varMonitor);
-            }
-            body
-            {
-                debug(2) writeln("Handling varMonitorCommand ", command);
-
-                void handleData(VarType)(ubyte varIndex, ubyte[] data)
-                if(canMonitor!VarType)
-                {
-                    void emitData(VarType)(ubyte varIndex, VarType receivedData, VarType adaptedData)
-                    {
-                        alias varTypeSignalWrappers = Alias!(mixin(getVarMonitorSignalWrappersName!VarType));
-                        auto wrapper = varIndex in varTypeSignalWrappers;
-
-                        if(wrapper)
-                        {
-                            auto signalWrapper = *wrapper;
-
-                            synchronized(signalWrapper)
-                            {
-                                signalWrapper.emit(varIndex, receivedData, adaptedData, timer.peek().msecs);
-                            }
-                        }
-                        else
-                            debug(2) writeln("SignalWrapper for type ", VarType.stringof, "and varIndex ", varIndex, "was no longer in its SignalWrapper assoc array. Skipping signal emission.");
-                    }
-
-                    VarType decodeData(VarType : short)(ubyte[] data) pure
-                    {
-                        enum ubytePossibleValues = 256;
-                        return to!short(data[0] * ubytePossibleValues + data[1]);
-                    }
-
-                    VarType adaptData(VarType)(VarType data)
-                    {
-                        alias typeAdapters = Alias!(mixin(getVarMonitorValueAdaptersName!VarType));
-
-                        auto adapter = varIndex in typeAdapters;
-
-                        if(adapter)
-                            return adapter.opCall(data);
-                        else
-                            return data;
-                    }
-
-                    auto receivedData = decodeData!VarType(data);
-                    auto adaptedData = adaptData(receivedData);
-
-                    logger.logSensor(timer.peek().msecs, this.getVarMonitorSensorName!VarType(varIndex), to!string(receivedData), to!string(adaptedData));
-
-                    emitData(varIndex, receivedData, adaptedData);
-                }
-
-                void delegate (ubyte, ubyte[]) selectDelegate(VarMonitorTypeCode typeCode)
-                {
-                    string generateSwitch()
-                    {
-                        string str = "switch (typeCode) with (VarMonitorTypeCode) {";
-
-                        foreach(varType; VarMonitorTypes)
-                        {
-                            str ~= "case " ~ (getVarMonitorTypeCode!varType).stringof ~ ": return &handleData!" ~ varType.stringof ~ ";";
-                        }
-
-                        str ~= "default: return null; }" ;
-
-                        return str;
-                    }
-
-                    mixin(generateSwitch());
-                }
-
-                try
-                {
-                    auto handler = selectDelegate(to!VarMonitorTypeCode(command[1]));
-                    if(handler)
-                        handler(command[2], command[3..$]);
-                }catch(ConvException e)
-                {
-                    writeln("Received invalid varMonitor type: ",e);
-                }
-            }
-
-            static ubyte[] readBuffer = [];
-
-            readBuffer ~= readBytes;
-
-            void popReadBuffer(size_t elements = 1)
-            {
-                readBuffer = readBuffer.length >= elements ? readBuffer[elements..$] : [];
-            }
-
-            if(readBuffer[0] != commandControlByte)
-            {
-                debug writeln("Received corrupt command. Discarding first byte and returning");
-                popReadBuffer();
-                return;
-            }
-
-            if(readBuffer.length < 2)
-                return;
-
-            //Try to make sense out of the readBytes
-            switch(readBuffer[1])
-            {
-                case ReadCommands.analogMonitor:
-                    if(readBuffer.length < 5)
-                        return;
-
-                    handleAnalogMonitorCommand(readBuffer[1..5]);
-                    popReadBuffer(5);
-                    break;
-
-                case ReadCommands.varMonitor:
-                    if(readBuffer.length < 6)
-                        return;
-
-                    handleVarMonitorCommand(readBuffer[1..6]);
-                    popReadBuffer(6);
-                    break;
-
-                case ReadCommands.error:
-                    writeln("Error received!");
-                    break;
-
-                default:
-                    writeln("Unhandled ubyte command received: ", readBuffer[0], ". Cleaning command buffer.");
-                    readBuffer = [];
-            }
-        }
-
-        enum portReadTimeoutMs = 200;
-        arduinoSerialPort = ISerialPort.getInstance(fileName, parity, baudRate, portReadTimeoutMs);
-        if(!arduinoSerialPort.open())
-        {
-            ownerTid.send(CommunicationEstablishedMessage(false));
-            return;
-        }
-
-        //Arduino seems to need some time between port opening and communication start
-        Thread.sleep(dur!"seconds"(1));
-
-        enum ubyte[] puppeteerReadyCommand = [0x0, 0x0];
-        arduinoSerialPort.write([commandControlByte] ~ puppeteerReadyCommand);
-
-        //Wait for the puppet to answer it is ready
-        {
-            enum ubyte[] puppetReadyCommand = [0x0, 0x0];
-            ubyte[] cache = [];
-            enum msBetweenChecks = 100;
-
-            int readCounter = 0;
-            enum readsUntilFailure = 30;
-
-            while(true)
-            {
-                ubyte[] readBytes = arduinoSerialPort.read(1);
-
-                if(readBytes !is null)
-                {
-                    cache ~= readBytes;
-                    debug writeln("handshake cache is currently ", cache);
-
-                    if(cache.length == 3)
-                    {
-                        if(cache == [commandControlByte] ~ puppetReadyCommand)
-                            break; //Ready!
-                        else
-                            cache = cache[1..$]; //pop front and continue
-                    }
-                }
-
-                if(++readCounter > readsUntilFailure)
-                {
-                    ownerTid.send(CommunicationEstablishedMessage(false));
-                    return;
-                }
-
-                Thread.sleep(dur!"msecs"(msBetweenChecks));
-            }
-        }
-
-        communicationOn = true;
-        ownerTid.send(CommunicationEstablishedMessage(true));
-        timer.start();
-
-        try
-        {
-            logger = new PuppeteerLogger(logFilename);
-        }
-        catch(LoggingException e)
-        {
-            debug writeln(e);
-            return;
-        }
-
-        logger.logInfo(timer.peek().msecs, "Puppeteer ready");
-
-        do
-        {
-            ubyte[] readBytes = arduinoSerialPort.read(bytesReadAtOnce);
-
-            if(readBytes !is null)
-            {
-                debug(3) writeln("Read bytes ", readBytes);
-                handleReadBytes(readBytes);
-            }
-
-            receiveTimeout(msecs(receiveTimeoutMs), &handleEndCommunicationMessage,
-                    &handlePinMonitorMessage,
-                    &handleVarMonitorMessage,
-                    &handleSetPWMMessage);
-
-        }while(shouldContinue);
-
-        void sendPuppeteerClosedCmd(ISerialPort serialPort)
-        {
-            debug writeln("Sending puppeteerClosedCommand");
-            serialPort.write([commandControlByte, 0x99]);
-        }
-        sendPuppeteerClosedCmd(arduinoSerialPort);
-
-        communicationOn = false;
-        arduinoSerialPort.close();
-
-        logger.logInfo(timer.peek().msecs, "Puppeteer closing...");
-
-        ownerTid.send(CommunicationEndedMessage());
-    }
-
-    private struct CommunicationEstablishedMessage
-    {
-        bool success;
-
-        this(bool success)
-        {
-            this.success = success;
-        }
-    }
-
-    private struct CommunicationEndedMessage
-    {
-
-    }
-
-    private struct EndCommunicationMessage
-    {
-
-    }
-
-    private struct PinMonitorMessage
-    {
-        enum Action
-        {
-            start,
-            stop
-        }
-
-        private Action action;
-        private ubyte pin;
-
-        this(Action action, ubyte pin)
-        {
-            this.action = action;
-            this.pin = pin;
-        }
-    }
-
-    private struct VarMonitorMessage
-    {
-        enum Action
-        {
-            start,
-            stop
-        }
-
-        private Action action;
-        private ubyte varIndex;
-        private VarMonitorTypeCode varTypeCode;
-
-        this(Action action, ubyte varIndex, VarMonitorTypeCode varTypeCode)
-        {
-            this.action = action;
-            this.varIndex = varIndex;
-            this.varTypeCode = varTypeCode;
-        }
-    }
-
-    private struct SetPWMMessage
-    {
-        ubyte pin;
-        ubyte value;
-
-        this(ubyte pin, ubyte value)
-        {
-            this.pin = pin;
-            this.value = value;
-        }
+        logger.logSensor(timer.peek().msecs, this.getVarMonitorSensorName!VarType(varIndex), to!string(receivedData), to!string(adaptedData));
     }
 }
 

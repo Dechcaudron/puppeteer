@@ -23,7 +23,7 @@ void main(string[] args)
 	enforce(devFilename != "" && exists(devFilename), "Please select an existing device using --dev [devicePath]");
 
 	writeln("Opening device file " ~ devFilename);
-	auto puppeteer = new Puppeteer!short();
+	auto puppeteer = new shared Puppeteer!short();
 
 	void showMenu()
 	{

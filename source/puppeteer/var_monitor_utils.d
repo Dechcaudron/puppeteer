@@ -1,8 +1,9 @@
 module puppeteer.var_monitor_utils;
 
 import std.typecons : Tuple;
+import std.meta : Alias;
 
-private enum VarMonitorTypeCode : byte
+package enum VarMonitorTypeCode : byte
 {
     _short = 0x0,
 }
