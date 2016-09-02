@@ -9,10 +9,11 @@ public import puppeteer.serial.parity;
 
 import puppeteer.signal_wrapper;
 import puppeteer.exception.invalid_adapter_expression_exception;
-import puppeteer.communicator;
 import puppeteer.var_monitor_utils;
 import puppeteer.puppeteer_config;
 import puppeteer.logging.ipuppeteer_logger;
+
+import puppeteer.communication.icommunicator;
 
 import std.stdio;
 import std.concurrency;
@@ -25,7 +26,6 @@ import std.datetime;
 import std.exception;
 
 import core.time;
-import core.thread;
 
 public alias pinListenerDelegate = void delegate (ubyte, float, float, long) shared;
 private alias varMonitorDelegateType(VarType) = AliasSeq!(ubyte, VarType, VarType, long);
@@ -41,12 +41,14 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     alias PinSignalWrapper = SignalWrapper!(ubyte, float, float, long);
 
     //Manually synchronized between both logical threads
-    protected shared PinSignalWrapper[ubyte] pinSignalWrappers;
-    protected shared mixin(unrollVariableSignalWrappers!VarMonitorTypes());
+    protected PinSignalWrapper[ubyte] pinSignalWrappers;
+    protected mixin(unrollVariableSignalWrappers!VarMonitorTypes());
 
-    protected Communicator!VarMonitorTypes communicator;
+    protected ICommunicator!VarMonitorTypes communicator;
 
     protected PuppeteerConfig!VarMonitorTypes config;
+
+    protected IPuppeteerLogger logger;
 
     @property
     shared(PuppeteerConfig!VarMonitorTypes) configuration()
@@ -59,12 +61,13 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     @property
     bool isCommunicationEstablished()
     {
-        return communicator.isCommunicationEstablished;
+        return communicator.isCommunicationOngoing;
     }
 
-    this(shared Communicator!VarMonitorTypes communicator)
+    this(shared ICommunicator!VarMonitorTypes communicator, shared IPuppeteerLogger logger)
     {
         this.communicator = communicator;
+        this.logger = logger;
     }
 
     public void addPinListener(ubyte pin, pinListenerDelegate listener)
@@ -188,7 +191,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
     public bool startCommunication(string devFilename, BaudRate baudRate, Parity parity, string logFilename)
     {
-        communicator.startCommunication(devFilename, baudRate, parity, logFilename);
+        return communicator.startCommunication(this, devFilename, baudRate, parity, logFilename);
     }
 
     public void endCommunication()
@@ -207,62 +210,39 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
     package void emitAIRead(byte pin, float readValue, long readMilliseconds)
     {
-        float adaptedValue;
-
-        auto adapter = pin in AIValueAdapters;
-        if(adapter)
-        {
-            adaptedValue = adapter(realValue);
-        }
-        else
-        {
-            adaptedValue = readValue;
-        }
-
         auto signalWrapper = pin in pinSignalWrappers;
         if(signalWrapper)
         {
             synchronized(*signalWrapper)
             {
-                signalWrapper.emit(pin, readValue, adaptedValue, timer.peek().msecs);
+                signalWrapper.emit(pin, readValue, config.adaptAIValue(pin, readValue), readMilliseconds);
             }
         }
         else
             debug(2) writeln("No listeners registered for pin ",pin);
 
-        logger.logSensor(timer.peek().msecs, getAISensorName(pin), to!string(realValue), to!string(adaptedValue));
+        logger.logSensor(readMilliseconds, config.getAISensorName(pin), to!string(readValue), to!string(config.adaptAIValue(pin, readValue)));
     }
 
-    package void emitVarRead(VarMonitorType)(byte varIndex, VarMonitorType readValue, long readMilliseconds)
-    if(canMonitor!VarMonitorType)
+    package void emitVarRead(VarType)(byte varIndex, VarType readValue, long readMilliseconds)
+    if(canMonitor!VarType)
     {
-        VarMonitorType adaptedValue;
+        VarType adaptedValue = config.adaptVarMonitorValue(varIndex, readValue);
 
-        // Adapt value
-        {
-            alias typeAdapters = Alias!(mixin(getVarMonitorValueAdaptersName!VarType));
-
-            auto adapter = varIndex in typeAdapters;
-            if(adapter)
-                adaptedValue = adapter(readValue);
-            else
-                adaptedValue = readValue;
-        }
-
-        alias varTypeSignalWrappers = Alias!(mixin(getVarMonitorSignalWrappersName!VarMonitorType));
+        alias varTypeSignalWrappers = Alias!(mixin(getVarMonitorSignalWrappersName!VarType));
 
         auto wrapper = varIndex in varTypeSignalWrappers;
         if(wrapper)
         {
-            synchronized(*signalWrapper)
+            synchronized(*wrapper)
             {
-                signalWrapper.emit(varIndex, readValue, adaptedData, readMilliseconds);
+                wrapper.emit(varIndex, readValue, adaptedValue, readMilliseconds);
             }
         }
         else
             debug(2) writeln("SignalWrapper for type ", VarType.stringof, "and varIndex ", varIndex, "was no longer in its SignalWrapper assoc array. Skipping signal emission.");
 
-        logger.logSensor(timer.peek().msecs, this.getVarMonitorSensorName!VarType(varIndex), to!string(receivedData), to!string(adaptedData));
+        logger.logSensor(readMilliseconds, config.getVarMonitorSensorName!VarType(varIndex), to!string(readValue), to!string(adaptedValue));
     }
 }
 

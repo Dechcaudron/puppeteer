@@ -5,13 +5,13 @@ import puppeteer.logging.basic_logger;
 
 import std.format : format;
 
-class PuppeteerLogger : IPuppeteerLogger
+shared class PuppeteerLogger : IPuppeteerLogger
 {
     BasicLogger logger;
 
     this(string logFilename)
     {
-        logger = BasicLogger(logFilename);
+        logger = shared BasicLogger(logFilename);
     }
 
     void logSensor(long timeMs, string sensorName, string readValue, string adaptedValue)

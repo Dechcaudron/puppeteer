@@ -4,14 +4,33 @@ import puppeteer.logging.logging_exception;
 
 import std.concurrency;
 import std.stdio;
+import std.conv;
 
-struct BasicLogger
+package shared struct BasicLogger
 {
-    Tid loggerTid;
+    private static int next_id = 0;
+    private int id;
+
+    @property
+    private string loggerTidName()
+    {
+        enum nameBase = "puppeteer.logging.basic_logger";
+
+        return nameBase ~ to!string(id);
+    }
+
+    @property
+    private Tid loggerTid()
+    {
+        return locate(loggerTidName);
+    }
 
     this(string logFilename)
     {
-        loggerTid = spawn(&loggingLoop, logFilename);
+        id = next_id++;
+
+        Tid loggerTid = spawn(&loggingLoop, logFilename);
+        register(loggerTidName, loggerTid);
 
         receive(
             (LoopInitializedMessage msg)

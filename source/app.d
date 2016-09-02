@@ -7,7 +7,10 @@ import std.string;
 import std.format;
 
 import puppeteer.puppeteer;
+import puppeteer.logging.puppeteer_logger;
 import dummy_listener;
+
+import puppeteer.communication.communicator;
 
 immutable string loggerTidName = "loggerTid";
 
@@ -23,7 +26,7 @@ void main(string[] args)
 	enforce(devFilename != "" && exists(devFilename), "Please select an existing device using --dev [devicePath]");
 
 	writeln("Opening device file " ~ devFilename);
-	auto puppeteer = new shared Puppeteer!short();
+	auto puppeteer = new shared Puppeteer!short(new shared Communicator!short, new shared PuppeteerLogger(loggingFilename));
 
 	void showMenu()
 	{
@@ -50,7 +53,7 @@ void main(string[] args)
 			writeln(to!string(int(option)) ~ " - " ~ optionMsg);
 		}
 
-		auto listener = new DummyListener!short(puppeteer);
+		auto listener = new shared DummyListener!short(puppeteer);
 
 		void addPinMonitor()
 		{
@@ -149,7 +152,7 @@ void main(string[] args)
             }
 
             ubyte pin = to!ubyte(pinInput);
-            puppeteer.setAIValueAdapter(pin, expr);
+            puppeteer.configuration.setAIValueAdapter(pin, expr);
 
             writefln("Setting AI adapter for pin %s to f(x)=%s", pin, expr !is null ? expr : "x");
         }
@@ -167,7 +170,7 @@ void main(string[] args)
                 return;
 
             ubyte varIndex = to!ubyte(varIndexInput);
-            puppeteer.setVarMonitorValueAdapter!short(varIndex, expr);
+            puppeteer.configuration.setVarMonitorValueAdapter!short(varIndex, expr);
 
             writefln("Setting variable adapter for internal variable %s to f(x)=%s", varIndex, expr !is null ? expr : "x");
         }
@@ -194,8 +197,8 @@ void main(string[] args)
 				name = null;
 			}
 
-			puppeteer.setAISensorName(to!ubyte(pin), name);
-			writefln("AI %s sensor name set to %s", pin, puppeteer.getAISensorName(to!ubyte(pin)));
+			puppeteer.configuration.setAISensorName(to!ubyte(pin), name);
+			writefln("AI %s sensor name set to %s", pin, puppeteer.configuration.getAISensorName(to!ubyte(pin)));
 		}
 
 		void setVarMonitorSensorName()
@@ -220,8 +223,8 @@ void main(string[] args)
 				name = null;
 			}
 
-			puppeteer.setVarMonitorSensorName!short(to!ubyte(index), name);
-			writefln("Var Monitor %s sensor name set to %s", index, puppeteer.getVarMonitorSensorName!short(to!ubyte(index)));
+			puppeteer.configuration.setVarMonitorSensorName!short(to!ubyte(index), name);
+			writefln("Var Monitor %s sensor name set to %s", index, puppeteer.configuration.getVarMonitorSensorName!short(to!ubyte(index)));
 		}
 
         void saveConfigUI()
@@ -241,7 +244,7 @@ void main(string[] args)
             bool failedToWrite = false;
             try
             {
-                if(puppeteer.saveConfig(filename))
+                if(puppeteer.configuration.saveConfig(filename))
                     writefln("Configuration saved to %s.", filename);
                 else
                     failedToWrite = true;
@@ -276,7 +279,7 @@ void main(string[] args)
 
             try
             {
-                if(puppeteer.loadConfig(filename))
+                if(puppeteer.configuration.loadConfig(filename))
                     writefln("Loaded configuration from file %s into the puppeteer.", filename);
                 else
                     failedToRead = true;

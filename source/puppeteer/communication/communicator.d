@@ -1,80 +1,106 @@
-module puppeteer.communicator;
+module puppeteer.communication.communicator;
 
-import puppeteer.communicator_messages;
-import puppeteer.exception.communication_exception;
+import puppeteer.puppeteer;
+import puppeteer.var_monitor_utils;
 
-import std.concurrency : Tid;
+import puppeteer.logging.ipuppeteer_logger;
 
-shared class Communicator(VarMonitorTypes...)
+import puppeteer.communication.icommunicator;
+import puppeteer.communication.communicator_messages;
+import puppeteer.communication.communication_exception;
+
+import std.stdio;
+import std.exception;
+import std.concurrency;
+import std.datetime;
+import std.conv;
+
+import core.thread;
+import core.atomic;
+
+shared class Communicator(VarMonitorTypes...) : ICommunicator!VarMonitorTypes
 {
-    protected Tid workerTid;
+    static int next_id = 0;
+    private int id;
 
     @property
-    package bool isCommunicationEstablished()
+    private string workerTidName()
+    {
+        enum nameBase = "puppeteer.communicator";
+
+        return nameBase ~ to!string(id);
+    }
+
+    @property
+    private Tid workerTid()
+    {
+        return locate(workerTidName);
+    }
+
+    /* End of ugly fix */
+
+    @property
+    public bool isCommunicationOngoing()
     {
         return workerTid != Tid.init;
     }
 
-    protected Puppeteer!VarMonitorTypes puppeteer;
+    protected Puppeteer!VarMonitorTypes connectedPuppeteer;
 
-    this(Puppeteer!VarMonitorTypes puppeteer)
+    this()
     {
-        this.puppeteer = puppeteer;
+        id = next_id++;
     }
 
-    private void enforceCommunicationEstablished()
+    public bool startCommunication(shared Puppeteer!VarMonitorTypes puppeteer, string devFilename, BaudRate baudRate, Parity parity, string logFilename)
     {
-        enforce!CommunicationException(isCommunicationEstablished);
-    }
+        enforce!CommunicationException(!isCommunicationOngoing);
 
-    package bool startCommunication(string devFilename, BaudRate baudRate, Parity parity, string logFilename)
-    {
-        enforce!CommunicationException(!isCommunicationEstablished);
+        connectedPuppeteer = puppeteer;
 
-        workerTid = spawn(&communicationLoop, devFilename, baudRate, parity, logFilename);
+        auto workerTid = spawn(&communicationLoop, devFilename, baudRate, parity, logFilename);
+        register(workerTidName, workerTid);
 
         auto msg = receiveOnly!CommunicationEstablishedMessage();
+
         if(!msg.success)
-            workerTid = Tid.init;
+            connectedPuppeteer = null;
 
         return msg.success;
     }
 
-    package void endCommunication()
+    public void endCommunication()
     {
-        enforceCommunicationEstablished();
+        enforceCommunicationOngoing();
 
         workerTid.send(EndCommunicationMessage());
         receiveOnly!CommunicationEndedMessage();
 
-        workerTid = Tid.init;
+        connectedPuppeteer = null;
     }
 
-    package void changeAIMonitorStatus(ubyte pin, bool shouldMonitor)
+    public void changeAIMonitorStatus(ubyte pin, bool shouldMonitor)
     {
-        enforceCommunicationEstablished();
+        enforceCommunicationOngoing();
         workerTid.send(PinMonitorMessage(shouldMonitor ? PinMonitorMessage.Action.start : PinMonitorMessage.Action.stop, pin));
     }
 
-    package void changeVarMonitorStatus(VarType)(ubyte varIndex, bool shouldMonitor)
+    mixin(unrollChangeVarMonitorStatusMethods!VarMonitorTypes);
+    public void changeVarMonitorStatus(VarType)(ubyte varIndex, bool shouldMonitor)
     {
-        enforceCommunicationEstablished();
+        enforceCommunicationOngoing();
         workerTid.send(VarMonitorMessage(shouldMonitor ? VarMonitorMessage.Action.start : VarMonitorMessage.Action.stop,
                                          varIndex, getVarMonitorTypeCode!VarType));
     }
 
-    package void setPWMValue(ubyte pin, ubyte pwmValue)
+    public void setPWMValue(ubyte pin, ubyte pwmValue)
     {
-        enforceCommunicationEstablished();
-        workerId.send(SetPWMMessage(pin, value));
+        enforceCommunicationOngoing();
+        workerTid.send(SetPWMMessage(pin, pwmValue));
     }
 
     private void communicationLoop(string fileName, immutable BaudRate baudRate, immutable Parity parity, string logFilename)
     {
-        import puppeteer.logging.ipuppeteer_logger;
-        import puppeteer.logging.puppeteer_logger;
-        import puppeteer.logging.logging_exception;
-
         enum receiveTimeoutMs = 10;
         enum bytesReadAtOnce = 1;
 
@@ -191,9 +217,9 @@ shared class Communicator(VarMonitorTypes...)
                 enum ubytePossibleValues = 256;
 
                 ushort encodedValue = command[2] * ubytePossibleValues + command[3];
-                float realValue =  arduinoAnalogReference * to!float(encodedValue) / arduinoAnalogReadMax;
+                float readValue =  arduinoAnalogReference * to!float(encodedValue) / arduinoAnalogReadMax;
 
-                puppeteer.emitAIRead(pin, readValue, readMilliseconds);
+                connectedPuppeteer.emitAIRead(pin, readValue, readMilliseconds);
             }
 
             void handleVarMonitorCommand(ubyte[] command)
@@ -209,7 +235,7 @@ shared class Communicator(VarMonitorTypes...)
                 debug(2) writeln("Handling varMonitorCommand ", command);
 
                 void handleData(VarType)(ubyte varIndex, ubyte[] data)
-                if(puppeteer.canMonitor!VarType)
+                if(connectedPuppeteer.canMonitor!VarType)
                 {
                     VarType decodeData(VarType : short)(ubyte[] data) pure
                     {
@@ -219,7 +245,7 @@ shared class Communicator(VarMonitorTypes...)
 
                     auto receivedData = decodeData!VarType(data);
 
-                    puppeteer.emitVarRead!VarType(varIndex, receivedData, timer.peek().msecs);
+                    connectedPuppeteer.emitVarRead!VarType(varIndex, receivedData, timer.peek().msecs);
                 }
 
                 void delegate (ubyte, ubyte[]) selectDelegate(VarMonitorTypeCode typeCode)
@@ -308,7 +334,7 @@ shared class Communicator(VarMonitorTypes...)
             return;
         }
 
-        //Arduino seems to need some time between port opening and communication start
+        //Some puppets seems to need some time between port opening and communication start
         Thread.sleep(dur!"seconds"(1));
 
         enum ubyte[] puppeteerReadyCommand = [0x0, 0x0];
@@ -351,21 +377,8 @@ shared class Communicator(VarMonitorTypes...)
             }
         }
 
-        communicationOn = true;
         ownerTid.send(CommunicationEstablishedMessage(true));
         timer.start();
-
-        try
-        {
-            logger = new PuppeteerLogger(logFilename);
-        }
-        catch(LoggingException e)
-        {
-            debug writeln(e);
-            return;
-        }
-
-        logger.logInfo(timer.peek().msecs, "Puppeteer ready");
 
         do
         {
@@ -391,10 +404,7 @@ shared class Communicator(VarMonitorTypes...)
         }
         sendPuppeteerClosedCmd(arduinoSerialPort);
 
-        communicationEstablished = false;
         arduinoSerialPort.close();
-
-        logger.logInfo(timer.peek().msecs, "Puppeteer closing...");
 
         ownerTid.send(CommunicationEndedMessage());
     }

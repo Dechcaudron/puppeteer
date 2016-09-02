@@ -1,12 +1,14 @@
-module puppeteer.puppeteer_config;
+module puppeteer.configuration.configuration;
 
 import puppeteer.var_monitor_utils;
 import puppeteer.value_adapter;
 import puppeteer.exception.invalid_configuration_exception;
 
-import std.meta : allSatisfy;
+import std.meta;
+import std.conv;
+import std.stdio;
 
-shared class PuppeteerConfig(VarMonitorTypes...)
+shared class Configuration(VarMonitorTypes...)
 if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 {
     protected ValueAdapter!float[ubyte] AIValueAdapters;
@@ -22,34 +24,40 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
     public string getAIValueAdapter(ubyte pin)
     {
-        if(pin in AIValueAdapters)
-        {
-            return AIValueAdapters[pin].expression;
-        }
-        else
-        {
-            return "";
-        }
+        auto adapter = pin in AIValueAdapters;
+
+        return adapter ? adapter.expression : "";
     }
 
-    public void setVarMonitorValueAdapter(T)(ubyte varIndex, string adapterExpression)
-    if(canMonitor!T)
+    public float adaptAIValue(ubyte pin, float value)
     {
-        alias adapterDict = Alias!(mixin(getVarMonitorValueAdaptersName!T));
+        auto adapter = pin in AIValueAdapters;
+
+        return adapter ? adapter.opCall(value) : value;
+    }
+
+    public void setVarMonitorValueAdapter(VarType)(ubyte varIndex, string adapterExpression)
+    {
+        alias adapterDict = Alias!(mixin(getVarMonitorValueAdaptersName!VarType));
         setAdapter(adapterDict, varIndex, adapterExpression);
     }
 
     public string getVarMonitorValueAdapter(VarType)(ubyte varIndex)
-    if(canMonitor!VarType)
     {
         alias adapterDict = Alias!(mixin(getVarMonitorValueAdaptersName!VarType));
 
-        if(varIndex in adapterDict)
-        {
-            return adapterDict[varIndex].expression;
-        }
-        else
-            return "";
+        auto adapter = varIndex in adapterDict;
+
+        return adapter ? adapter.expression : "";
+    }
+
+    public VarType adaptVarMonitorValue(VarType)(ubyte varIndex, VarType value)
+    {
+        alias adapterDict = Alias!(mixin(getVarMonitorValueAdaptersName!VarType));
+
+        auto adapter = varIndex in adapterDict;
+
+        return adapter ? adapter.opCall(value) : value;
     }
 
     private void setAdapter(T)(ref shared ValueAdapter!T[ubyte] adapterDict, ubyte position, string adapterExpression)
@@ -71,13 +79,11 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     }
 
     public void setVarMonitorSensorName(MonitorType)(ubyte position, string name)
-    if(canMonitor!MonitorType)
     {
         setSensorName(mixin(getVarMonitorSensorNames!MonitorType), position, name);
     }
 
     public string getVarMonitorSensorName(MonitorType)(ubyte position) const
-    if(canMonitor!MonitorType)
     {
         return getSensorName(mixin(getVarMonitorSensorNames!MonitorType), position, varMonitorSensorDefaultName!MonitorType ~ "(" ~ to!string(position) ~ ")");
     }
@@ -145,6 +151,9 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         return true;
     }
 
+    private enum configAIAdaptersKey = "AI_ADAPTERS";
+    private enum configVarAdaptersKey = "VAR_ADAPTERS";
+
     private void applyConfig(string configStr)
     {
         import std.json;
@@ -211,23 +220,20 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
         foreach(member; __traits(allMembers, VarMonitorTypeCode))
         {
-            static if(canMonitor!(getVarMonitorType!(Alias!(mixin("VarMonitorTypeCode." ~ member)))))
+            alias varMonitorAdapters = Alias!(mixin(getVarMonitorValueAdaptersName!(getVarMonitorType!(Alias!(mixin("VarMonitorTypeCode." ~ member))))));
+
+            if(varMonitorAdapters.length > 0)
             {
-                alias varMonitorAdapters = Alias!(mixin(getVarMonitorValueAdaptersName!(getVarMonitorType!(Alias!(mixin("VarMonitorTypeCode." ~ member))))));
+                string typeName = member[0 .. $-2];
 
-                if(varMonitorAdapters.length > 0)
+                JSONValue typeMonitorAdaptersJSON = JSONValue(emptyJson);
+
+                foreach(varIndex, adapter; varMonitorAdapters)
                 {
-                    string typeName = member[0 .. $-2];
-
-                    JSONValue typeMonitorAdaptersJSON = JSONValue(emptyJson);
-
-                    foreach(varIndex, adapter; varMonitorAdapters)
-                    {
-                        typeMonitorAdaptersJSON.object[to!string(varIndex)] = JSONValue(adapter.expression);
-                    }
-
-                    varAdapters.object[typeName] = typeMonitorAdaptersJSON;
+                    typeMonitorAdaptersJSON.object[to!string(varIndex)] = JSONValue(adapter.expression);
                 }
+
+                varAdapters.object[typeName] = typeMonitorAdaptersJSON;
             }
         }
 

@@ -1,4 +1,4 @@
-module puppeteer.exception.communication_exception;
+module puppeteer.communication.communication_exception;
 
 public class CommunicationException : Exception
 {
