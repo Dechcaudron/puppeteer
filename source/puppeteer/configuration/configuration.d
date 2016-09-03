@@ -1,14 +1,23 @@
 module puppeteer.configuration.configuration;
 
+import test.puppeteer.configuration.configuration_test : test;
+mixin test;
+
 import puppeteer.var_monitor_utils;
-import puppeteer.value_adapter;
-import puppeteer.exception.invalid_configuration_exception;
+import puppeteer.value_adapter.value_adapter;
+
+import puppeteer.configuration.iconfiguration;
+
+import puppeteer.configuration.invalid_configuration_exception;
 
 import std.meta;
 import std.conv;
 import std.stdio;
 
-shared class Configuration(VarMonitorTypes...)
+private enum configAIAdaptersKey = "AI_ADAPTERS";
+private enum configVarAdaptersKey = "VAR_ADAPTERS";
+
+shared class Configuration(VarMonitorTypes...) : IConfiguration!VarMonitorTypes
 if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 {
     protected ValueAdapter!float[ubyte] AIValueAdapters;
@@ -17,32 +26,35 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     protected string[ubyte] AISensorNames;
     protected mixin(unrollVarMonitorSensorNames!VarMonitorTypes());
 
-    public void setAIValueAdapter(ubyte pin, string adapterExpression)
+    //pragma(msg, unrollHelperMethods!VarMonitorTypes());
+    mixin(unrollHelperMethods!VarMonitorTypes());
+
+    public void setAIValueAdapterExpression(ubyte pin, string adapterExpression)
     {
-        setAdapter(AIValueAdapters, pin, adapterExpression);
+        setAdapterExpression(AIValueAdapters, pin, adapterExpression);
     }
 
-    public string getAIValueAdapter(ubyte pin)
+    public string getAIValueAdapterExpression(ubyte pin) const
     {
         auto adapter = pin in AIValueAdapters;
 
         return adapter ? adapter.expression : "";
     }
 
-    public float adaptAIValue(ubyte pin, float value)
+    public float adaptAIValue(ubyte pin, float value) const
     {
         auto adapter = pin in AIValueAdapters;
 
         return adapter ? adapter.opCall(value) : value;
     }
 
-    public void setVarMonitorValueAdapter(VarType)(ubyte varIndex, string adapterExpression)
+    public void setVarMonitorValueAdapterExpression(VarType)(ubyte varIndex, string adapterExpression)
     {
         alias adapterDict = Alias!(mixin(getVarMonitorValueAdaptersName!VarType));
-        setAdapter(adapterDict, varIndex, adapterExpression);
+        setAdapterExpression(adapterDict, varIndex, adapterExpression);
     }
 
-    public string getVarMonitorValueAdapter(VarType)(ubyte varIndex)
+    public string getVarMonitorValueAdapterExpression(VarType)(ubyte varIndex) const
     {
         alias adapterDict = Alias!(mixin(getVarMonitorValueAdaptersName!VarType));
 
@@ -51,7 +63,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         return adapter ? adapter.expression : "";
     }
 
-    public VarType adaptVarMonitorValue(VarType)(ubyte varIndex, VarType value)
+    public VarType adaptVarMonitorValue(VarType)(ubyte varIndex, VarType value) const
     {
         alias adapterDict = Alias!(mixin(getVarMonitorValueAdaptersName!VarType));
 
@@ -60,7 +72,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         return adapter ? adapter.opCall(value) : value;
     }
 
-    private void setAdapter(T)(ref shared ValueAdapter!T[ubyte] adapterDict, ubyte position, string adapterExpression)
+    private void setAdapterExpression(T)(ref shared ValueAdapter!T[ubyte] adapterDict, ubyte position, string adapterExpression)
     {
         if(adapterExpression)
             adapterDict[position] = shared ValueAdapter!T(adapterExpression);
@@ -104,71 +116,19 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
             return defaultName;
     }
 
-    public bool saveConfig(string targetPath)
-    in
+    public void load(File configFile)
     {
-        assert(targetPath !is null);
-        assert(targetPath != "");
-    }
-    body
-    {
-        debug writeln("Trying to save configuration to " ~ targetPath);
-        string config = generateConfigString();
-
-        File f = File(targetPath, "w");
-        scope(exit) f.close();
-
-        if(!f.isOpen)
-            return false;
-
-        f.write(config);
-
-        debug writeln("Success!");
-        return true;
-    }
-
-    public bool loadConfig(string sourcePath)
-    in
-    {
-        assert(sourcePath !is null);
-        assert(sourcePath != "");
-    }
-    body
-    {
-        debug writeln("Trying to load configuration from path ",sourcePath);
-        File f = File(sourcePath, "r");
-        scope(exit) f.close();
-
-        if(!f.isOpen)
-            return false;
+        debug writeln("Trying to load configuration from file ", configFile.name != "" ? configFile.name : "with no name");
 
         string content;
-        f.readf("%s", &content);
+        configFile.readf("%s", &content);
 
-        applyConfig(content);
+        load(content);
         debug writeln("Success!");
-
-        return true;
     }
 
-    private enum configAIAdaptersKey = "AI_ADAPTERS";
-    private enum configVarAdaptersKey = "VAR_ADAPTERS";
-
-    private void applyConfig(string configStr)
+    public void load(string configStr)
     {
-        import std.json;
-
-        JSONValue top = parseJSON(configStr);
-
-        JSONValue aiAdapters = top[configAIAdaptersKey].object;
-
-        foreach(string key, expr; aiAdapters)
-        {
-            setAIValueAdapter(to!ubyte(key), expr.str);
-        }
-
-        JSONValue varAdapters = top[configVarAdaptersKey].object;
-
         void setVarMonitorAdapterDynamic(string typeName, ubyte varIndex, string expr)
         {
             string generateSwitch()
@@ -178,7 +138,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
                 foreach(t; VarMonitorTypes)
                 {
                     str ~= "case \"" ~ t.stringof ~ "\":";
-                    str ~= "setVarMonitorValueAdapter!" ~ t.stringof ~ "(varIndex, expr);";
+                    str ~= "setVarMonitorValueAdapterExpression!" ~ t.stringof ~ "(varIndex, expr);";
                     str ~= "break;";
                 }
 
@@ -191,16 +151,48 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
             mixin(generateSwitch());
         }
 
-        foreach(string typeName, innerJson; varAdapters)
+        import std.json;
+
+        try
         {
-            foreach(string varIndex, expr; innerJson)
+            JSONValue top = parseJSON(configStr);
+
+            JSONValue aiAdapters = top[configAIAdaptersKey].object;
+
+            foreach(string key, expr; aiAdapters)
             {
-                setVarMonitorAdapterDynamic(typeName, to!ubyte(varIndex), expr.str);
+                setAIValueAdapterExpression(to!ubyte(key), expr.str);
             }
+
+            JSONValue varAdapters = top[configVarAdaptersKey].object;
+
+            foreach(string typeName, innerJson; varAdapters)
+            {
+                foreach(string varIndex, expr; innerJson)
+                {
+                    setVarMonitorAdapterDynamic(typeName, to!ubyte(varIndex), expr.str);
+                }
+            }
+        }
+        catch(JSONException e)
+        {
+            debug writeln(e);
+            throw new InvalidConfigurationException("Invalid configuration string: " ~ configStr);
         }
     }
 
-    private string generateConfigString()
+    public void save(File sinkFile, bool flush = true) const
+    {
+        debug writeln("Trying to save configuration in file ", sinkFile.name != "" ? sinkFile.name : "with no name");
+
+        sinkFile.write(save());
+        if(flush)
+            sinkFile.flush();
+
+        debug writeln("Sucess!");
+    }
+
+    public string save() const
     {
         import std.json;
 
@@ -218,13 +210,13 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
         JSONValue varAdapters = JSONValue(emptyJson);
 
-        foreach(member; __traits(allMembers, VarMonitorTypeCode))
+        foreach(T; VarMonitorTypes)
         {
-            alias varMonitorAdapters = Alias!(mixin(getVarMonitorValueAdaptersName!(getVarMonitorType!(Alias!(mixin("VarMonitorTypeCode." ~ member))))));
+            alias varMonitorAdapters = Alias!(mixin(getVarMonitorValueAdaptersName!(getVarMonitorType!(Alias!(mixin("VarMonitorTypeCode._" ~ T.stringof))))));
 
             if(varMonitorAdapters.length > 0)
             {
-                string typeName = member[0 .. $-2];
+                string typeName = T.stringof;
 
                 JSONValue typeMonitorAdaptersJSON = JSONValue(emptyJson);
 

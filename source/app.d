@@ -7,10 +7,14 @@ import std.string;
 import std.format;
 
 import puppeteer.puppeteer;
-import puppeteer.logging.puppeteer_logger;
 import dummy_listener;
 
+import puppeteer.logging.puppeteer_logger;
+
 import puppeteer.communication.communicator;
+
+import puppeteer.configuration.configuration;
+import puppeteer.configuration.invalid_configuration_exception;
 
 immutable string loggerTidName = "loggerTid";
 
@@ -26,7 +30,7 @@ void main(string[] args)
 	enforce(devFilename != "" && exists(devFilename), "Please select an existing device using --dev [devicePath]");
 
 	writeln("Opening device file " ~ devFilename);
-	auto puppeteer = new shared Puppeteer!short(new shared Communicator!short, new shared PuppeteerLogger(loggingFilename));
+	auto puppeteer = new shared Puppeteer!short(new shared Communicator!short, new shared Configuration!short, new shared PuppeteerLogger(loggingFilename));
 
 	void showMenu()
 	{
@@ -152,7 +156,7 @@ void main(string[] args)
             }
 
             ubyte pin = to!ubyte(pinInput);
-            puppeteer.configuration.setAIValueAdapter(pin, expr);
+            puppeteer.configuration.setAIValueAdapterExpression(pin, expr);
 
             writefln("Setting AI adapter for pin %s to f(x)=%s", pin, expr !is null ? expr : "x");
         }
@@ -170,7 +174,7 @@ void main(string[] args)
                 return;
 
             ubyte varIndex = to!ubyte(varIndexInput);
-            puppeteer.configuration.setVarMonitorValueAdapter!short(varIndex, expr);
+            puppeteer.configuration.setVarMonitorValueAdapterExpression!short(varIndex, expr);
 
             writefln("Setting variable adapter for internal variable %s to f(x)=%s", varIndex, expr !is null ? expr : "x");
         }
@@ -244,10 +248,9 @@ void main(string[] args)
             bool failedToWrite = false;
             try
             {
-                if(puppeteer.configuration.saveConfig(filename))
-                    writefln("Configuration saved to %s.", filename);
-                else
-                    failedToWrite = true;
+                File f = File(filename, "w");
+                puppeteer.configuration.save(f);
+                writefln("Configuration saved to %s.", filename);
             }
             catch(Exception e)
             {
@@ -273,16 +276,13 @@ void main(string[] args)
                 return;
             }
 
-            import puppeteer.exception.invalid_configuration_exception : InvalidConfigurationException;
-
             bool failedToRead = false;
 
             try
             {
-                if(puppeteer.configuration.loadConfig(filename))
-                    writefln("Loaded configuration from file %s into the puppeteer.", filename);
-                else
-                    failedToRead = true;
+                File f = File(filename, "r");
+                puppeteer.configuration.load(filename);
+                writefln("Loaded configuration from file %s into the puppeteer.", filename);
             }
             catch(InvalidConfigurationException e)
             {

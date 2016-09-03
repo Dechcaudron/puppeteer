@@ -1,4 +1,4 @@
-module test.puppeteer.value_adapter;
+module test.puppeteer.value_adapter.value_adapter;
 
 mixin template test()
 {

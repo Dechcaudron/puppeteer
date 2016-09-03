@@ -8,12 +8,15 @@ public import puppeteer.serial.baud_rate;
 public import puppeteer.serial.parity;
 
 import puppeteer.signal_wrapper;
-import puppeteer.exception.invalid_adapter_expression_exception;
 import puppeteer.var_monitor_utils;
-import puppeteer.puppeteer_config;
+
 import puppeteer.logging.ipuppeteer_logger;
 
+import puppeteer.value_adapter.invalid_adapter_expression_exception;
+
 import puppeteer.communication.icommunicator;
+
+import puppeteer.configuration.iconfiguration;
 
 import std.stdio;
 import std.concurrency;
@@ -46,12 +49,12 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
     protected ICommunicator!VarMonitorTypes communicator;
 
-    protected PuppeteerConfig!VarMonitorTypes config;
+    protected IConfiguration!VarMonitorTypes config;
 
     protected IPuppeteerLogger logger;
 
     @property
-    shared(PuppeteerConfig!VarMonitorTypes) configuration()
+    shared(IConfiguration!VarMonitorTypes) configuration()
     {
         return config;
     }
@@ -64,9 +67,10 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         return communicator.isCommunicationOngoing;
     }
 
-    this(shared ICommunicator!VarMonitorTypes communicator, shared IPuppeteerLogger logger)
+    this(shared ICommunicator!VarMonitorTypes communicator, shared IConfiguration!VarMonitorTypes configuration, shared IPuppeteerLogger logger)
     {
         this.communicator = communicator;
+        this.config = configuration;
         this.logger = logger;
     }
 

@@ -1,11 +1,11 @@
-module puppeteer.value_adapter;
+module puppeteer.value_adapter.value_adapter;
 
-import puppeteer.exception.invalid_adapter_expression_exception;
+import test.puppeteer.value_adapter.value_adapter : test;
+mixin test;
+
+import puppeteer.value_adapter.invalid_adapter_expression_exception;
 
 import arith_eval.evaluable;
-
-import test.puppeteer.value_adapter : test;
-mixin test;
 
 shared struct ValueAdapter(T)
 {
@@ -13,7 +13,7 @@ shared struct ValueAdapter(T)
     private string _expression;
 
     @property
-    public string expression()
+    public string expression() const
     {
         return _expression;
     }
@@ -21,7 +21,7 @@ shared struct ValueAdapter(T)
     @property
     private void expression(string rhs)
     {
-        _expression = expression;
+        _expression = rhs;
     }
 
     this(string xBasedValueAdapterExpr)

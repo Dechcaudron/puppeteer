@@ -1,4 +1,4 @@
-module puppeteer.exception.invalid_adapter_expression_exception;
+module puppeteer.value_adapter.invalid_adapter_expression_exception;
 
 public class InvalidAdapterExpressionException : Exception
 {

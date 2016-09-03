@@ -1,4 +1,4 @@
-module puppeteer.exception.invalid_configuration_exception;
+module puppeteer.configuration.invalid_configuration_exception;
 
 public class InvalidConfigurationException : Exception
 {
