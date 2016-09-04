@@ -98,9 +98,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
             shared PinSignalWrapper signalWrapper = *wrapper;
 
             synchronized(signalWrapper)
-            {
                 signalWrapper.addListener(listener);
-            }
         }
     }
 
@@ -135,12 +133,11 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     {
         alias typeSignalWrappers = Alias!(mixin(getVarMonitorSignalWrappersName!VarType));
         auto wrapper = varIndex in typeSignalWrappers;
+
         if(wrapper)
         {
             synchronized(*wrapper)
-            {
                 wrapper.addListener(listener);
-            }
         }
         else
         {
@@ -204,10 +201,9 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
         //Remove all listeners
         foreach(pin; pinSignalWrappers.byKey())
-        {
             synchronized(pinSignalWrappers[pin])
                 pinSignalWrappers.remove(pin);
-        }
+
 
         //TODO: remove listeners for variables as well
     }
@@ -218,12 +214,12 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         if(signalWrapper)
         {
             synchronized(*signalWrapper)
-            {
                 signalWrapper.emit(pin, readValue, config.adaptAIValue(pin, readValue), readMilliseconds);
-            }
         }
         else
+        {
             debug(2) writeln("No listeners registered for pin ",pin);
+        }
 
         logger.logSensor(readMilliseconds, config.getAISensorName(pin), to!string(readValue), to!string(config.adaptAIValue(pin, readValue)));
     }
@@ -239,12 +235,12 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         if(wrapper)
         {
             synchronized(*wrapper)
-            {
                 wrapper.emit(varIndex, readValue, adaptedValue, readMilliseconds);
-            }
         }
         else
+        {
             debug(2) writeln("SignalWrapper for type ", VarType.stringof, "and varIndex ", varIndex, "was no longer in its SignalWrapper assoc array. Skipping signal emission.");
+        }
 
         logger.logSensor(readMilliseconds, config.getVarMonitorSensorName!VarType(varIndex), to!string(readValue), to!string(adaptedValue));
     }
@@ -255,9 +251,7 @@ private pure string unrollVariableSignalWrappers(VarTypes...)()
     string unroll = "";
 
     foreach(varType; VarTypes)
-    {
         unroll ~= getVarMonitorSignalWrappersType!varType ~ " " ~ getVarMonitorSignalWrappersName!varType ~ ";\n";
-    }
 
     return unroll;
 }
