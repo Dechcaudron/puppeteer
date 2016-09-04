@@ -82,15 +82,20 @@ shared class Communicator(VarMonitorTypes...) : ICommunicator!VarMonitorTypes
     public void changeAIMonitorStatus(ubyte pin, bool shouldMonitor)
     {
         enforceCommunicationOngoing();
-        workerTid.send(PinMonitorMessage(shouldMonitor ? PinMonitorMessage.Action.start : PinMonitorMessage.Action.stop, pin));
+        workerTid.send(PinMonitorMessage(shouldMonitor ?
+                                            PinMonitorMessage.Action.start :
+                                            PinMonitorMessage.Action.stop, pin));
     }
 
     mixin(unrollChangeVarMonitorStatusMethods!VarMonitorTypes);
     public void changeVarMonitorStatus(VarType)(ubyte varIndex, bool shouldMonitor)
     {
         enforceCommunicationOngoing();
-        workerTid.send(VarMonitorMessage(shouldMonitor ? VarMonitorMessage.Action.start : VarMonitorMessage.Action.stop,
-                                         varIndex, getVarMonitorTypeCode!VarType));
+        workerTid.send(VarMonitorMessage(shouldMonitor ?
+                                            VarMonitorMessage.Action.start :
+                                            VarMonitorMessage.Action.stop,
+                                            varIndex,
+                                            varMonitorTypeCode!VarType));
     }
 
     public void setPWMValue(ubyte pin, ubyte pwmValue)
@@ -256,7 +261,7 @@ shared class Communicator(VarMonitorTypes...) : ICommunicator!VarMonitorTypes
 
                         foreach(varType; VarMonitorTypes)
                         {
-                            str ~= "case " ~ (getVarMonitorTypeCode!varType).stringof ~ ": return &handleData!" ~ varType.stringof ~ ";";
+                            str ~= "case " ~ to!string(varMonitorTypeCode!varType) ~ ": return &handleData!" ~ varType.stringof ~ ";";
                         }
 
                         str ~= "default: return null; }" ;

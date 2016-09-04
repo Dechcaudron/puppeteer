@@ -13,9 +13,12 @@ import puppeteer.configuration.invalid_configuration_exception;
 import std.meta;
 import std.conv;
 import std.stdio;
+import std.json;
 
 private enum configAIAdaptersKey = "AI_ADAPTERS";
 private enum configVarAdaptersKey = "VAR_ADAPTERS";
+private enum configAISensorNamesKey = "AI_SENSOR_NAMES";
+private enum configVarSensorNamesKey = "VAR_SENSOR_NAMES";
 
 shared class Configuration(VarMonitorTypes...) : IConfiguration!VarMonitorTypes
 if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
@@ -92,12 +95,12 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
     public void setVarMonitorSensorName(MonitorType)(ubyte position, string name)
     {
-        setSensorName(mixin(getVarMonitorSensorNames!MonitorType), position, name);
+        setSensorName(varMonitorSensorNames!MonitorType, position, name);
     }
 
     public string getVarMonitorSensorName(MonitorType)(ubyte position) const
     {
-        return getSensorName(mixin(getVarMonitorSensorNames!MonitorType), position, varMonitorSensorDefaultName!MonitorType ~ "(" ~ to!string(position) ~ ")");
+        return getSensorName(varMonitorSensorNames!MonitorType, position, varMonitorDefaultSensorName!MonitorType ~ "(" ~ to!string(position) ~ ")");
     }
 
     private void setSensorName(ref shared string[ubyte] namesDict, ubyte position, string name)
@@ -129,48 +132,64 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
     public void load(string configStr)
     {
-        void setVarMonitorAdapterDynamic(string typeName, ubyte varIndex, string expr)
+        string generateSwitch(string method, string arguments)
         {
-            string generateSwitch()
+            string str = "switch(typeName) {";
+
+            foreach(t; VarMonitorTypes)
             {
-                string str = "switch(typeName) {";
-
-                foreach(t; VarMonitorTypes)
-                {
-                    str ~= "case \"" ~ t.stringof ~ "\":";
-                    str ~= "setVarMonitorValueAdapterExpression!" ~ t.stringof ~ "(varIndex, expr);";
-                    str ~= "break;";
-                }
-
-                str ~= "default: throw new InvalidConfigurationException(\"Type \" ~ typeName ~ \" is not supported by this Puppeteer\");";
-                str ~= "}";
-
-                return str;
+                str ~= "case \"" ~ t.stringof ~ "\":";
+                str ~=  method ~ "!" ~ t.stringof ~ arguments ~ ";";
+                str ~= "break;";
             }
 
-            mixin(generateSwitch());
+            str ~= "default: throw new InvalidConfigurationException(\"Type \" ~ typeName ~ \" is not supported by this Puppeteer\");";
+            str ~= "}";
+
+            return str;
         }
 
-        import std.json;
+        void setVarMonitorAdapterDynamic(string typeName, ubyte varIndex, string expr)
+        {
+            mixin(generateSwitch("setVarMonitorValueAdapterExpression", "(varIndex, expr)"));
+        }
+
+        void setVarMonitorSensorNameDynamic(string typeName, ubyte varIndex, string name)
+        {
+            mixin(generateSwitch("setVarMonitorSensorName", "(varIndex, name)"));
+        }
 
         try
         {
-            JSONValue top = parseJSON(configStr);
-
-            JSONValue aiAdapters = top[configAIAdaptersKey].object;
-
-            foreach(string key, expr; aiAdapters)
+            foreach(string key, inner; parseJSON(configStr).object)
             {
-                setAIValueAdapterExpression(to!ubyte(key), expr.str);
-            }
-
-            JSONValue varAdapters = top[configVarAdaptersKey].object;
-
-            foreach(string typeName, innerJson; varAdapters)
-            {
-                foreach(string varIndex, expr; innerJson)
+                switch(key)
                 {
-                    setVarMonitorAdapterDynamic(typeName, to!ubyte(varIndex), expr.str);
+                    case configAIAdaptersKey:
+                        foreach(string pin, expr; inner.object)
+                            setAIValueAdapterExpression(to!ubyte(pin), expr.str);
+                        break;
+
+                    case configVarAdaptersKey:
+                        foreach(string typeName, innerJson; inner.object)
+                            foreach(string varIndex, expr; innerJson)
+                                setVarMonitorAdapterDynamic(typeName, to!ubyte(varIndex), expr.str);
+                        break;
+
+                    case configAISensorNamesKey:
+                        foreach(string pin, name; inner.object)
+                            setAISensorName(to!ubyte(pin), name.str);
+                        break;
+
+                    case configVarSensorNamesKey:
+                        foreach(string typeName, innerJson; inner.object)
+                            foreach(string varIndex, name; innerJson)
+                                setVarMonitorSensorNameDynamic(typeName, to!ubyte(varIndex), name.str);
+                        break;
+
+                    default:
+                        debug writefln("Unexpected entry with key '%s' found
+                        in configuration JSON. Ignoring entry.", key);
                 }
             }
         }
@@ -199,40 +218,85 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         enum emptyJson = string[string].init;
 
         JSONValue config = JSONValue(emptyJson);
-        JSONValue AIAdapters = JSONValue(emptyJson);
 
-        foreach(pin, adapter; AIValueAdapters)
+        // AI value adapters
+        if(AIValueAdapters.length > 0)
         {
-            AIAdapters.object[to!string(pin)] = JSONValue(adapter.expression);
+
+            JSONValue json = JSONValue(emptyJson);
+
+            foreach(pin, adapter; AIValueAdapters)
+                json.object[to!string(pin)] = JSONValue(adapter.expression);
+
+            config.object[configAIAdaptersKey] = json;
         }
 
-        config.object[configAIAdaptersKey] = AIAdapters;
-
-        JSONValue varAdapters = JSONValue(emptyJson);
-
-        foreach(T; VarMonitorTypes)
+        // VarMonitor value adapters
         {
-            alias varMonitorAdapters = Alias!(mixin(getVarMonitorValueAdaptersName!(getVarMonitorType!(Alias!(mixin("VarMonitorTypeCode._" ~ T.stringof))))));
+            JSONValue varAdapters = JSONValue(emptyJson);
+            bool anyWritten = false;
 
-            if(varMonitorAdapters.length > 0)
+            foreach(T; VarMonitorTypes)
             {
-                string typeName = T.stringof;
+                alias varMonitorAdapters = varMonitorValueAdapters!T;
 
-                JSONValue typeMonitorAdaptersJSON = JSONValue(emptyJson);
-
-                foreach(varIndex, adapter; varMonitorAdapters)
+                if(varMonitorAdapters.length > 0)
                 {
-                    typeMonitorAdaptersJSON.object[to!string(varIndex)] = JSONValue(adapter.expression);
-                }
+                    anyWritten = true;
+                    JSONValue json = JSONValue(emptyJson);
 
-                varAdapters.object[typeName] = typeMonitorAdaptersJSON;
+                    foreach(varIndex, adapter; varMonitorAdapters)
+                        json.object[to!string(varIndex)] = JSONValue(adapter.expression);
+
+                        varAdapters.object[T.stringof] = json;
+                }
             }
+
+            if(anyWritten)
+                config.object[configVarAdaptersKey] = varAdapters;
         }
 
-        config.object[configVarAdaptersKey] = varAdapters;
+        // AI sensor names
+        if(AISensorNames.length > 0)
+        {
+            JSONValue json = JSONValue(emptyJson);
+
+            foreach(pin, name; AISensorNames)
+                json.object[to!string(pin)] = JSONValue(name);
+
+            config.object[configAISensorNamesKey] = json;
+        }
+
+        // VarMonitor sensor names
+        {
+            JSONValue varNames = JSONValue(emptyJson);
+            bool anyWritten = false;
+
+            foreach(T; VarMonitorTypes)
+            {
+                alias varMonitorNames = varMonitorSensorNames!T;
+
+                if(varMonitorNames.length > 0)
+                {
+                    anyWritten = true;
+                    JSONValue typeMonitorNamesJSON = JSONValue(emptyJson);
+
+                    foreach(varIndex, name; varMonitorNames)
+                        typeMonitorNamesJSON.object[to!string(varIndex)] = JSONValue(name);
+
+                    varNames.object[T.stringof] = typeMonitorNamesJSON;
+                }
+            }
+
+            if(anyWritten)
+                config.object[configVarSensorNamesKey] = varNames;
+        }
 
         return config.toPrettyString();
     }
+
+    private alias varMonitorValueAdapters(T) = Alias!(mixin(getVarMonitorValueAdaptersName!T));
+    private alias varMonitorSensorNames(T) =  Alias!(mixin(getVarMonitorSensorNamesName!T));
 }
 
 //Clean this
@@ -240,10 +304,8 @@ private pure string unrollVariableValueAdapters(VarTypes...)()
 {
     string unroll = "";
 
-    foreach(varType; VarTypes)
-    {
-        unroll ~= getVarMonitorValueAdaptersType!varType ~ " " ~ getVarMonitorValueAdaptersName!varType ~ ";\n";
-    }
+    foreach(T; VarTypes)
+        unroll ~= getVarMonitorValueAdaptersType!T ~ " " ~ getVarMonitorValueAdaptersName!T ~ ";\n";
 
     return unroll;
 }
@@ -251,16 +313,14 @@ private pure string unrollVariableValueAdapters(VarTypes...)()
 private enum getVarMonitorValueAdaptersType(VarType) = "ValueAdapter!(" ~ VarType.stringof ~ ")[ubyte]";
 private enum getVarMonitorValueAdaptersName(VarType) = VarType.stringof ~ "ValueAdapters";
 
-private enum getVarMonitorSensorNames(VarType) = VarType.stringof ~ "SensorNames";
+private enum getVarMonitorSensorNamesName(VarType) = VarType.stringof ~ "SensorNames";
 
 private pure string unrollVarMonitorSensorNames(VarTypes...)()
 {
     string unroll = "";
 
-    foreach(varType; VarTypes)
-    {
-        unroll ~= "string[ubyte] " ~ getVarMonitorSensorNames!varType ~ ";\n";
-    }
+    foreach(T; VarTypes)
+        unroll ~= "string[ubyte] " ~ getVarMonitorSensorNamesName!T ~ ";\n";
 
     return unroll;
 }

@@ -6,6 +6,7 @@ mixin template test()
     import std.file;
     import std.format;
     import std.exception;
+    import std.stdio;
 
     unittest
     {
@@ -13,16 +14,39 @@ mixin template test()
 
         a.setAIValueAdapterExpression(0, "x");
         a.setAIValueAdapterExpression(3, "5+x");
+
+        JSONValue ai = JSONValue(["0" : "x", "3" : "5+x"]);
+
+        assert(a.save() == JSONValue([configAIAdaptersKey : ai]).toPrettyString());
+
         a.setVarMonitorValueAdapterExpression!short(1, "-x");
         a.setVarMonitorValueAdapterExpression!short(5, "x-3");
 
-        JSONValue ai = JSONValue(["0" : "x", "3" : "5+x"]);
         JSONValue shorts = JSONValue(["1" : "-x", "5" : "x-3"]);
         JSONValue vars = JSONValue(["short" : shorts]);
-        JSONValue mockConfig = JSONValue([configAIAdaptersKey : ai, configVarAdaptersKey : vars]);
+
+        assert(a.save() == JSONValue([configAIAdaptersKey : ai,
+                                        configVarAdaptersKey : vars]).toPrettyString);
+
+        a.setAISensorName(0, "zero");
+
+        JSONValue aiNames = JSONValue(["0" : "zero"]);
+
+        assert(a.save() == JSONValue([configAIAdaptersKey : ai,
+                                        configVarAdaptersKey : vars,
+                                        configAISensorNamesKey : aiNames]).toPrettyString);
+
+        a.setVarMonitorSensorName!short(1, "shortOne");
+
+        JSONValue shortNames = JSONValue(["1" : "shortOne"]);
+        JSONValue varNames = JSONValue(["short" : shortNames]);
+
+        assert(a.save() == JSONValue([configAIAdaptersKey : ai,
+                                        configVarAdaptersKey : vars,
+                                        configAISensorNamesKey : aiNames,
+                                        configVarSensorNamesKey : varNames]).toPrettyString);
 
         string aSaved = a.save();
-        assert(aSaved == mockConfig.toPrettyString());
 
         File aSavedTmp = File.tmpfile();
         assert(aSavedTmp.isOpen);
@@ -37,7 +61,7 @@ mixin template test()
 
         b.load(aSaved);
 
-        assert(b.save() == mockConfig.toPrettyString());
+        assert(b.save() == aSaved);
 
         auto c = new shared Configuration!();
         assertThrown!InvalidConfigurationException(c.load(aSaved));

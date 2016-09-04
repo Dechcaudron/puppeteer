@@ -9,7 +9,12 @@ package enum VarMonitorTypeCode : byte
     _short = 0x0,
 }
 
-public enum isVarMonitorTypeSupported(VarType) = __traits(compiles, getVarMonitorTypeCode!VarType) && __traits(compiles, varMonitorSensorDefaultName!VarType);
+private enum VarMonitorDefaultSensorName
+{
+    _short = "Int16"
+}
+
+public enum isVarMonitorTypeSupported(VarType) = __traits(compiles, varMonitorTypeCode!VarType) && __traits(compiles, varMonitorDefaultSensorName!VarType);
 unittest
 {
     assert(isVarMonitorTypeSupported!short);
@@ -17,28 +22,23 @@ unittest
     assert(!isVarMonitorTypeSupported!void);
 }
 
-package alias getVarMonitorTypeCode(VarType) = Alias!(mixin(VarMonitorTypeCode.stringof ~ "._" ~ VarType.stringof));
+package alias varMonitorTypeCode(VarType) = Alias!(to!VarMonitorTypeCode("_" ~ VarType.stringof)); //Alias!(mixin(VarMonitorTypeCode.stringof ~ "._" ~ VarType.stringof));
 unittest
 {
-    assert(getVarMonitorTypeCode!short == VarMonitorTypeCode._short);
+    assert(varMonitorTypeCode!short == VarMonitorTypeCode._short);
 }
 
-private enum VarMonitorSensorDefaultName
-{
-    _short = "Int16"
-}
-
-package alias varMonitorSensorDefaultName(VarMonitorType) = Alias!(mixin(VarMonitorSensorDefaultName.stringof ~ "._" ~ VarMonitorType.stringof));
+package alias varMonitorDefaultSensorName(VarMonitorType) = Alias!(to!VarMonitorDefaultSensorName("_" ~ VarMonitorType.stringof));
 unittest
 {
-    assert(varMonitorSensorDefaultName!short == VarMonitorSensorDefaultName._short);
+    assert(varMonitorDefaultSensorName!short == VarMonitorDefaultSensorName._short);
 }
 
-package alias getVarMonitorType(VarMonitorTypeCode typeCode) = Alias!(mixin("Alias!(" ~ to!string(typeCode)[1..$] ~ ")"));
+package alias varMonitorType(VarMonitorTypeCode typeCode) = Alias!(mixin("Alias!(" ~ to!string(typeCode)[1..$] ~ ")"));
 unittest
 {
     with(VarMonitorTypeCode)
     {
-        assert(is(getVarMonitorType!_short == short));
+        assert(is(varMonitorType!_short == short));
     }
 }
