@@ -46,6 +46,16 @@ mixin template test()
                                         configAISensorNamesKey : aiNames,
                                         configVarSensorNamesKey : varNames]).toPrettyString);
 
+        a.setPWMOutAvgAdapterExpression(3, "x/3");
+
+        JSONValue pwmOut = JSONValue(["3" : "x/3"]);
+
+        assert(a.save() == JSONValue([configAIAdaptersKey : ai,
+                                        configPWMOutAvgAdaptersKey : pwmOut,
+                                        configVarAdaptersKey : vars,
+                                        configAISensorNamesKey : aiNames,
+                                        configVarSensorNamesKey : varNames]).toPrettyString);
+
         string aSaved = a.save();
 
         File aSavedTmp = File.tmpfile();
@@ -77,5 +87,13 @@ mixin template test()
         e.load(dSaved);
 
         assert(dSaved == e.save());
+    }
+
+    unittest
+    {
+        auto a = new shared Configuration!();
+
+        a.setPWMOutAvgAdapterExpression(0, "x/2");
+        assert(a.adaptPWMOutAvgValue(0, 5) == 5f/2);
     }
 }

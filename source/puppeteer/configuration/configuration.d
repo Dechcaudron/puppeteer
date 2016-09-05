@@ -16,7 +16,9 @@ import std.stdio;
 import std.json;
 
 private enum configAIAdaptersKey = "AI_ADAPTERS";
+private enum configPWMOutAvgAdaptersKey = "PWM_OUT_AVG_ADAPTERS";
 private enum configVarAdaptersKey = "VAR_ADAPTERS";
+
 private enum configAISensorNamesKey = "AI_SENSOR_NAMES";
 private enum configVarSensorNamesKey = "VAR_SENSOR_NAMES";
 
@@ -24,6 +26,7 @@ shared class Configuration(VarMonitorTypes...) : IConfiguration!VarMonitorTypes
 if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 {
     protected ValueAdapter!float[ubyte] AIValueAdapters;
+    protected ValueAdapter!float[ubyte] PWMOutAvgValueAdapters;
     protected mixin(unrollVariableValueAdapters!VarMonitorTypes());
 
     protected string[ubyte] AISensorNames;
@@ -41,12 +44,31 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     {
         auto adapter = pin in AIValueAdapters;
 
-        return adapter ? adapter.expression : "";
+        return adapter ? adapter.expression : "x";
     }
 
     public float adaptAIValue(ubyte pin, float value) const
     {
         auto adapter = pin in AIValueAdapters;
+
+        return adapter ? adapter.opCall(value) : value;
+    }
+
+    public void setPWMOutAvgAdapterExpression(ubyte pin, string adapterExpression)
+    {
+        setAdapterExpression(PWMOutAvgValueAdapters, pin, adapterExpression);
+    }
+
+    public string getPWMOutAvgAdapterExpression(ubyte pin) const
+    {
+        auto adapter = pin in PWMOutAvgValueAdapters;
+
+        return adapter ? adapter.expression : "x";
+    }
+
+    public float adaptPWMOutAvgValue(ubyte pin, float value) const
+    {
+        auto adapter = pin in PWMOutAvgValueAdapters;
 
         return adapter ? adapter.opCall(value) : value;
     }
@@ -63,7 +85,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
         auto adapter = varIndex in adapterDict;
 
-        return adapter ? adapter.expression : "";
+        return adapter ? adapter.expression : "x";
     }
 
     public VarType adaptVarMonitorValue(VarType)(ubyte varIndex, VarType value) const
@@ -170,6 +192,11 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
                             setAIValueAdapterExpression(to!ubyte(pin), expr.str);
                         break;
 
+                    case configPWMOutAvgAdaptersKey:
+                        foreach(string pin, expr; inner.object)
+                            setPWMOutAvgAdapterExpression(to!ubyte(pin), expr.str);
+                        break;
+
                     case configVarAdaptersKey:
                         foreach(string typeName, innerJson; inner.object)
                             foreach(string varIndex, expr; innerJson)
@@ -222,13 +249,23 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         // AI value adapters
         if(AIValueAdapters.length > 0)
         {
-
             JSONValue json = JSONValue(emptyJson);
 
             foreach(pin, adapter; AIValueAdapters)
                 json.object[to!string(pin)] = JSONValue(adapter.expression);
 
             config.object[configAIAdaptersKey] = json;
+        }
+
+        // PWM Out Average value adapters
+        if(PWMOutAvgValueAdapters.length > 0)
+        {
+            JSONValue json = JSONValue(emptyJson);
+
+            foreach(pin, adapter; PWMOutAvgValueAdapters)
+                json.object[to!string(pin)] = JSONValue(adapter.expression);
+
+            config.object[configPWMOutAvgAdaptersKey] = json;
         }
 
         // VarMonitor value adapters

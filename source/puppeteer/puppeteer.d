@@ -181,7 +181,8 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     public void setPWMAverage(ubyte pin, float averageValue)
     {
         enum pwmHigh = 5;
-        setPWM(pin, getPWMFromAverage!pwmHigh(averageValue));
+        float adaptedAvg = configuration.adaptPWMOutAvgValue(pin, averageValue);
+        setPWM(pin, getPWMFromAverage!pwmHigh(adaptedAvg));
     }
 
     private ubyte getPWMFromAverage(float pwmHigh)(float averageValue)

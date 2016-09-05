@@ -9,6 +9,10 @@ public shared interface IConfiguration(VarMonitorTypes...)
     string getAIValueAdapterExpression(ubyte pin);
     float adaptAIValue(ubyte pin, float value);
 
+    void setPWMOutAvgAdapterExpression(ubyte pin, string adapterExpression);
+    string getPWMOutAvgAdapterExpression(ubyte pin);
+    float adaptPWMOutAvgValue(ubyte pin, float value);
+
     void setAISensorName(ubyte pin, string name);
     string getAISensorName(ubyte pin) const;
 
