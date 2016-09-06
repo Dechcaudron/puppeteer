@@ -3,8 +3,6 @@ module puppeteer.communication.communicator;
 import puppeteer.puppeteer;
 import puppeteer.var_monitor_utils;
 
-import puppeteer.logging.ipuppeteer_logger;
-
 import puppeteer.communication.icommunicator;
 import puppeteer.communication.communicator_messages;
 import puppeteer.communication.communication_exception;
@@ -114,8 +112,6 @@ shared class Communicator(VarMonitorTypes...) : ICommunicator!VarMonitorTypes
         bool shouldContinue = true;
 
         ISerialPort arduinoSerialPort;
-        IPuppeteerLogger logger;
-        scope(exit) destroy(logger);
 
         void handlePinMonitorMessage(PinMonitorMessage msg)
         {

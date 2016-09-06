@@ -9,8 +9,6 @@ import std.format;
 import puppeteer.puppeteer;
 import dummy_listener;
 
-import puppeteer.logging.puppeteer_logger;
-
 import puppeteer.communication.communicator;
 
 import puppeteer.configuration.configuration;
@@ -30,7 +28,25 @@ void main(string[] args)
 	enforce(devFilename != "" && exists(devFilename), "Please select an existing device using --dev [devicePath]");
 
 	writeln("Opening device file " ~ devFilename);
-	auto puppeteer = new shared Puppeteer!short(new shared Communicator!short, new shared Configuration!short, new shared PuppeteerLogger(loggingFilename));
+
+	shared IPuppeteerLogger logger;
+
+	version(gnuplot_crafter)
+	{
+		import puppeteer.logging.multifile_gnuplot_crafter_logger;
+
+		logger = new shared MultifileGnuplotCrafterLogger("gnuplot/");
+	}
+	else
+	{
+		import puppeteer.logging.puppeteer_logger;
+
+		logger = new shared PuppeteerLogger(loggingFilename);
+	}
+
+	auto puppeteer = new shared Puppeteer!short(new shared Communicator!short,
+	 							new shared Configuration!short,
+								logger);
 
 	void showMenu()
 	{
@@ -43,7 +59,9 @@ void main(string[] args)
 			startVarMonitor,
 			stopVarMonitor,
 			pwm,
+			pwmAvg,
             setAIAdapter,
+			setPWMOutAvgAdapter,
             setVarMonitorAdapter,
 			setAISensorName,
 			setVarMonitorSensorName,
@@ -141,6 +159,24 @@ void main(string[] args)
 			puppeteer.setPWM(pin, pwmValue);
 		}
 
+		void setPWMAverage()
+		{
+			write("Introduce pin and PWM average value [pin-avgValue] (-1 to cancel): ");
+
+			int pinInput = -1;
+			float pwmValue;
+			string input = readln().chomp();
+			formattedRead(input, " %s-%s", &pinInput, &pwmValue);
+
+			if(pinInput < 0)
+				return;
+
+			ubyte pin = to!ubyte(pinInput);
+
+			writeln("Setting PWM pin ", pin, " to value ", pwmValue);
+			puppeteer.setPWMAverage(pin, pwmValue);
+		}
+
         void setAIAdapter()
         {
             write("Analog input adapter [pin:f(x)] (-1 to cancel): ");
@@ -151,15 +187,31 @@ void main(string[] args)
             formattedRead(input, " %s:%s", &pinInput, &expr);
 
             if(pinInput < 0)
-            {
                 return;
-            }
 
             ubyte pin = to!ubyte(pinInput);
             puppeteer.configuration.setAIValueAdapterExpression(pin, expr);
 
             writefln("Setting AI adapter for pin %s to f(x)=%s", pin, expr !is null ? expr : "x");
         }
+
+		void setPWMOutAvgAdapter()
+		{
+			write("PWM output average adapter [pin:f(x)] (-1 to cancel): ");
+
+            int pinInput = -1;
+            string expr;
+            string input = readln().chomp();
+            formattedRead(input, " %s:%s", &pinInput, &expr);
+
+            if(pinInput < 0)
+                return;
+
+            ubyte pin = to!ubyte(pinInput);
+            puppeteer.configuration.setPWMOutAvgAdapterExpression(pin, expr);
+
+            writefln("Setting AI adapter for pin %s to f(x)=%s", pin, expr !is null ? expr : "x");
+		}
 
         void setVarMonitorAdapter()
         {
@@ -281,7 +333,7 @@ void main(string[] args)
             try
             {
                 File f = File(filename, "r");
-                puppeteer.configuration.load(filename);
+                puppeteer.configuration.load(f);
                 writefln("Loaded configuration from file %s into the puppeteer.", filename);
             }
             catch(InvalidConfigurationException e)
@@ -312,7 +364,9 @@ void main(string[] args)
 				printOption(startVarMonitor, "Monitor internal variable");
 				printOption(stopVarMonitor, "Stop monitoring internal variable");
 				printOption(pwm, "Set PWM output");
+				printOption(pwmAvg, "Set PWM average output");
                 printOption(setAIAdapter, "Set AI value adapter");
+				printOption(setPWMOutAvgAdapter, "Set PWM out average adapter");
                 printOption(setVarMonitorAdapter, "Set internal variable value adapter");
 				printOption(setAISensorName, "Set AI sensor name");
 				printOption(setVarMonitorSensorName, "Set Variable Monitor sensor name");
@@ -332,103 +386,120 @@ void main(string[] args)
 				writeln("An established communication is required for this option.");
 			}
 
-			switch(option)
+
+			try
 			{
-				case Options.start:
-					if(!puppeteer.isCommunicationEstablished)
-					{
-						writeln("Establishing communication with puppet...");
-						if(puppeteer.startCommunication(devFilename, BaudRate.B9600, Parity.none, loggingFilename))
+				final switch(to!Options(option))
+				{
+					case Options.start:
+						if(!puppeteer.isCommunicationEstablished)
 						{
-							writeln("Communication established.");
+							writeln("Establishing communication with puppet...");
+							if(puppeteer.startCommunication(devFilename, BaudRate.B9600, Parity.none, loggingFilename))
+							{
+								writeln("Communication established.");
+							}
+							else
+								writeln("Could not establish communication with puppet.");
 						}
 						else
-							writeln("Could not establish communication with puppet.");
-					}
-					else
-						writeln("Communication is already established.");
+							writeln("Communication is already established.");
 
-					break;
+						break;
 
-				case Options.stop:
-					if(puppeteer.isCommunicationEstablished)
-					{
-						puppeteer.endCommunication();
-						writeln("Communication ended.");
-					}
-					else
-						writeln("Communication has not been established yet.");
-					break;
+					case Options.stop:
+						if(puppeteer.isCommunicationEstablished)
+						{
+							puppeteer.endCommunication();
+							writeln("Communication ended.");
+						}
+						else
+							writeln("Communication has not been established yet.");
+						break;
 
-				case Options.startPinMonitor:
-					if(puppeteer.isCommunicationEstablished)
-						addPinMonitor();
-					else
-						printCommunicationRequired();
-					break;
+					case Options.startPinMonitor:
+						if(puppeteer.isCommunicationEstablished)
+							addPinMonitor();
+						else
+							printCommunicationRequired();
+						break;
 
-				case Options.stopPinMonitor:
-					if(puppeteer.isCommunicationEstablished)
-						removePinMonitor();
-					else
-						printCommunicationRequired();
-					break;
+					case Options.stopPinMonitor:
+						if(puppeteer.isCommunicationEstablished)
+							removePinMonitor();
+						else
+							printCommunicationRequired();
+						break;
 
-				case Options.startVarMonitor:
-					if(puppeteer.isCommunicationEstablished)
-						addVarMonitor();
-					else
-						printCommunicationRequired();
-					break;
+					case Options.startVarMonitor:
+						if(puppeteer.isCommunicationEstablished)
+							addVarMonitor();
+						else
+							printCommunicationRequired();
+						break;
 
-				case Options.stopVarMonitor:
-					if(puppeteer.isCommunicationEstablished)
-						removeVarMonitor();
-					else
-						printCommunicationRequired();
-					break;
+					case Options.stopVarMonitor:
+						if(puppeteer.isCommunicationEstablished)
+							removeVarMonitor();
+						else
+							printCommunicationRequired();
+						break;
 
-				case Options.pwm:
-					if(puppeteer.isCommunicationEstablished)
-						setPWM();
-					else
-						printCommunicationRequired();
-					break;
+					case Options.pwm:
+						if(puppeteer.isCommunicationEstablished)
+							setPWM();
+						else
+							printCommunicationRequired();
+						break;
 
-                case Options.setAIAdapter:
-                    setAIAdapter();
-                    break;
+					case Options.pwmAvg:
+						if(puppeteer.isCommunicationEstablished)
+							setPWMAverage();
+						else
+							printCommunicationRequired();
+						break;
 
-                case Options.setVarMonitorAdapter:
-                    setVarMonitorAdapter();
-                    break;
+	                case Options.setAIAdapter:
+	                    setAIAdapter();
+	                    break;
 
-				case Options.setAISensorName:
-					setAISensorName();
-					break;
+					case Options.setPWMOutAvgAdapter:
+						setPWMOutAvgAdapter();
+						break;
 
-				case Options.setVarMonitorSensorName:
-					setVarMonitorSensorName();
-					break;
+	                case Options.setVarMonitorAdapter:
+	                    setVarMonitorAdapter();
+	                    break;
 
-                case Options.saveConfig:
-                    saveConfigUI();
-                    break;
+					case Options.setAISensorName:
+						setAISensorName();
+						break;
 
-                case Options.loadConfig:
-                    loadConfigUI();
-                    break;
+					case Options.setVarMonitorSensorName:
+						setVarMonitorSensorName();
+						break;
 
-				case Options.exit:
-					if(puppeteer.isCommunicationEstablished)
-					{
-						writeln("Finishing communication with puppet...");
-						puppeteer.endCommunication();
-					}
-					break menu;
+	                case Options.saveConfig:
+	                    saveConfigUI();
+	                    break;
 
-				default:
-					writeln("Please select a valid option.");
+	                case Options.loadConfig:
+	                    loadConfigUI();
+	                    break;
+
+					case Options.exit:
+						if(puppeteer.isCommunicationEstablished)
+						{
+							writeln("Finishing communication with puppet...");
+							puppeteer.endCommunication();
+						}
+						break menu;
+				}
+			}
+			catch(ConvException e)
+			{
+				debug writeln(e);
+				writeln("Please select a valid option");
 			}
 		}
 	}
