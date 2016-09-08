@@ -6,8 +6,11 @@ import std.conv;
 import std.string;
 import std.format;
 
-import puppeteer.puppeteer;
 import dummy_listener;
+
+import puppeteer.puppeteer;
+
+import puppeteer.logging.ipuppeteer_logger;
 
 import puppeteer.communication.communicator;
 
@@ -31,7 +34,7 @@ void main(string[] args)
 
 	shared IPuppeteerLogger logger;
 
-	version(gnuplot_crafter)
+	version(gnuplotCrafterLogging)
 	{
 		import puppeteer.logging.multifile_gnuplot_crafter_logger;
 
@@ -44,7 +47,7 @@ void main(string[] args)
 		logger = new shared PuppeteerLogger(loggingFilename);
 	}
 
-	auto puppeteer = new shared Puppeteer!short(new shared Communicator!short,
+	auto demoPuppeteer = new shared Puppeteer!short(new shared Communicator!short,
 	 							new shared Configuration!short,
 								logger);
 
@@ -75,7 +78,7 @@ void main(string[] args)
 			writeln(to!string(int(option)) ~ " - " ~ optionMsg);
 		}
 
-		auto listener = new shared DummyListener!short(puppeteer);
+		auto listener = new shared DummyListener!short(demoPuppeteer);
 
 		void addPinMonitor()
 		{
@@ -156,7 +159,7 @@ void main(string[] args)
 			ubyte pin = to!ubyte(pinInput);
 
 			writeln("Setting PWM pin ", pin, " to value ", pwmValue);
-			puppeteer.setPWM(pin, pwmValue);
+			demoPuppeteer.setPWM(pin, pwmValue);
 		}
 
 		void setPWMAverage()
@@ -174,7 +177,7 @@ void main(string[] args)
 			ubyte pin = to!ubyte(pinInput);
 
 			writeln("Setting PWM pin ", pin, " to value ", pwmValue);
-			puppeteer.setPWMAverage(pin, pwmValue);
+			demoPuppeteer.setPWMAverage(pin, pwmValue);
 		}
 
         void setAIAdapter()
@@ -190,7 +193,7 @@ void main(string[] args)
                 return;
 
             ubyte pin = to!ubyte(pinInput);
-            puppeteer.configuration.setAIValueAdapterExpression(pin, expr);
+            demoPuppeteer.configuration.setAIValueAdapterExpression(pin, expr);
 
             writefln("Setting AI adapter for pin %s to f(x)=%s", pin, expr !is null ? expr : "x");
         }
@@ -208,7 +211,7 @@ void main(string[] args)
                 return;
 
             ubyte pin = to!ubyte(pinInput);
-            puppeteer.configuration.setPWMOutAvgAdapterExpression(pin, expr);
+            demoPuppeteer.configuration.setPWMOutAvgAdapterExpression(pin, expr);
 
             writefln("Setting AI adapter for pin %s to f(x)=%s", pin, expr !is null ? expr : "x");
 		}
@@ -226,7 +229,7 @@ void main(string[] args)
                 return;
 
             ubyte varIndex = to!ubyte(varIndexInput);
-            puppeteer.configuration.setVarMonitorValueAdapterExpression!short(varIndex, expr);
+            demoPuppeteer.configuration.setVarMonitorValueAdapterExpression!short(varIndex, expr);
 
             writefln("Setting variable adapter for internal variable %s to f(x)=%s", varIndex, expr !is null ? expr : "x");
         }
@@ -253,8 +256,8 @@ void main(string[] args)
 				name = null;
 			}
 
-			puppeteer.configuration.setAISensorName(to!ubyte(pin), name);
-			writefln("AI %s sensor name set to %s", pin, puppeteer.configuration.getAISensorName(to!ubyte(pin)));
+			demoPuppeteer.configuration.setAISensorName(to!ubyte(pin), name);
+			writefln("AI %s sensor name set to %s", pin, demoPuppeteer.configuration.getAISensorName(to!ubyte(pin)));
 		}
 
 		void setVarMonitorSensorName()
@@ -279,8 +282,8 @@ void main(string[] args)
 				name = null;
 			}
 
-			puppeteer.configuration.setVarMonitorSensorName!short(to!ubyte(index), name);
-			writefln("Var Monitor %s sensor name set to %s", index, puppeteer.configuration.getVarMonitorSensorName!short(to!ubyte(index)));
+			demoPuppeteer.configuration.setVarMonitorSensorName!short(to!ubyte(index), name);
+			writefln("Var Monitor %s sensor name set to %s", index, demoPuppeteer.configuration.getVarMonitorSensorName!short(to!ubyte(index)));
 		}
 
         void saveConfigUI()
@@ -301,7 +304,7 @@ void main(string[] args)
             try
             {
                 File f = File(filename, "w");
-                puppeteer.configuration.save(f);
+                demoPuppeteer.configuration.save(f);
                 writefln("Configuration saved to %s.", filename);
             }
             catch(Exception e)
@@ -333,7 +336,7 @@ void main(string[] args)
             try
             {
                 File f = File(filename, "r");
-                puppeteer.configuration.load(f);
+                demoPuppeteer.configuration.load(f);
                 writefln("Loaded configuration from file %s into the puppeteer.", filename);
             }
             catch(InvalidConfigurationException e)
@@ -392,10 +395,10 @@ void main(string[] args)
 				final switch(to!Options(option))
 				{
 					case Options.start:
-						if(!puppeteer.isCommunicationEstablished)
+						if(!demoPuppeteer.isCommunicationEstablished)
 						{
 							writeln("Establishing communication with puppet...");
-							if(puppeteer.startCommunication(devFilename, BaudRate.B9600, Parity.none, loggingFilename))
+							if(demoPuppeteer.startCommunication(devFilename, BaudRate.B9600, Parity.none, loggingFilename))
 							{
 								writeln("Communication established.");
 							}
@@ -408,9 +411,9 @@ void main(string[] args)
 						break;
 
 					case Options.stop:
-						if(puppeteer.isCommunicationEstablished)
+						if(demoPuppeteer.isCommunicationEstablished)
 						{
-							puppeteer.endCommunication();
+							demoPuppeteer.endCommunication();
 							writeln("Communication ended.");
 						}
 						else
@@ -418,42 +421,42 @@ void main(string[] args)
 						break;
 
 					case Options.startPinMonitor:
-						if(puppeteer.isCommunicationEstablished)
+						if(demoPuppeteer.isCommunicationEstablished)
 							addPinMonitor();
 						else
 							printCommunicationRequired();
 						break;
 
 					case Options.stopPinMonitor:
-						if(puppeteer.isCommunicationEstablished)
+						if(demoPuppeteer.isCommunicationEstablished)
 							removePinMonitor();
 						else
 							printCommunicationRequired();
 						break;
 
 					case Options.startVarMonitor:
-						if(puppeteer.isCommunicationEstablished)
+						if(demoPuppeteer.isCommunicationEstablished)
 							addVarMonitor();
 						else
 							printCommunicationRequired();
 						break;
 
 					case Options.stopVarMonitor:
-						if(puppeteer.isCommunicationEstablished)
+						if(demoPuppeteer.isCommunicationEstablished)
 							removeVarMonitor();
 						else
 							printCommunicationRequired();
 						break;
 
 					case Options.pwm:
-						if(puppeteer.isCommunicationEstablished)
+						if(demoPuppeteer.isCommunicationEstablished)
 							setPWM();
 						else
 							printCommunicationRequired();
 						break;
 
 					case Options.pwmAvg:
-						if(puppeteer.isCommunicationEstablished)
+						if(demoPuppeteer.isCommunicationEstablished)
 							setPWMAverage();
 						else
 							printCommunicationRequired();
@@ -488,10 +491,10 @@ void main(string[] args)
 	                    break;
 
 					case Options.exit:
-						if(puppeteer.isCommunicationEstablished)
+						if(demoPuppeteer.isCommunicationEstablished)
 						{
 							writeln("Finishing communication with puppet...");
-							puppeteer.endCommunication();
+							demoPuppeteer.endCommunication();
 						}
 						break menu;
 				}

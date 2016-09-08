@@ -7,12 +7,26 @@
     "authors": ["Héctor Barreras Almarcha @Dechcaudron"],
     "license": "GPL-3.0",
 
+    "configurations" : [
+        {
+            "name" : "default-app",
+            "targetType" : "executable",
+        },
+        {
+            "name" : "gnuplot-logs-app",
+            "targetType" : "executable",
+            "versions" : ["gnuplotCrafterLogging"]
+        }
+    ],
+
+
     "dependencies" : {
     		"onyx-serial" : "~>0.5.0",
             "arith-eval": "~>0.4.0",
             "gnuplot-crafter": "~>0.2.0"
-
     	},
+
+
 
     "targetPath" : "out"
 }

@@ -112,7 +112,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
     public string getAISensorName(ubyte pin) const
     {
-        return getSensorName(AISensorNames, pin, "AI(" ~ to!string(pin) ~ ")");
+        return getSensorName(AISensorNames, pin, "AI_" ~ to!string(pin));
     }
 
     public void setVarMonitorSensorName(MonitorType)(ubyte position, string name)
