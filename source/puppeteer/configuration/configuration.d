@@ -122,7 +122,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 
     public string getVarMonitorSensorName(MonitorType)(ubyte position) const
     {
-        return getSensorName(varMonitorSensorNames!MonitorType, position, varMonitorDefaultSensorName!MonitorType ~ "(" ~ to!string(position) ~ ")");
+        return getSensorName(varMonitorSensorNames!MonitorType, position, varMonitorDefaultSensorName!MonitorType ~ "_" ~ to!string(position));
     }
 
     private void setSensorName(ref shared string[ubyte] namesDict, ubyte position, string name)

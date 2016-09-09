@@ -11,10 +11,13 @@ import gnuplot_crafter.multithreaded.singlevar_crafter;
 import std.conv;
 import std.stdio;
 
-public shared class MultifileGnuplotCrafterLogger : IPuppeteerLogger
+import core.atomic;
+
+public shared class MultifileGnuplotCrafterLogger(size_t flushCounter) : IPuppeteerLogger
 {
     string dataFilesPath;
     SingleVarCrafter!(float)*[string] crafters;
+    size_t[string] counters;
 
     this(string dataFilesPath)
     {
@@ -24,14 +27,18 @@ public shared class MultifileGnuplotCrafterLogger : IPuppeteerLogger
 
     ~this()
     {
-        writeln("logger destructor called");
+        debug writeln("Destroying logger");
         //Delete all allocated structs
         foreach(shared SingleVarCrafter!(float)* crafterPtr; crafters)
         {
-            writeln("destroying one crafter");
+            debug writeln("Finalizing crafter");
             crafterPtr.__dtor(); // Destroy does not call the destructor :(
+            debug writeln("Destructor called");
             destroy(crafterPtr);
+            debug writeln("Crafter destroyed");
         }
+        crafters.clear();
+        debug writeln("Logger destroyed");
     }
 
     private string getPathForSensorData(string sensorName)
@@ -44,12 +51,23 @@ public shared class MultifileGnuplotCrafterLogger : IPuppeteerLogger
         auto crafterPtr = sensorName in crafters;
 
         if(crafterPtr !is null)
+        {
             crafters[sensorName].put(to!float(timeMs), to!float(adaptedValue));
+
+            auto counterPtr = sensorName in counters;
+
+            atomicOp!"+="(*counterPtr, 1);
+            if(*counterPtr >= flushCounter)
+            {
+                crafters[sensorName].flush();
+                *counterPtr = 0;
+            }
+        }
         else
         {
-            writeln("creating one crafter");
             crafters[sensorName] = new shared SingleVarCrafter!float(getPathForSensorData(sensorName), false);
             crafters[sensorName].put(to!float(timeMs), to!float(adaptedValue));
+            counters[sensorName] = 1;
         }
     }
 

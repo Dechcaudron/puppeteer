@@ -67,11 +67,16 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         return communicator.isCommunicationOngoing;
     }
 
-    this(shared ICommunicator!VarMonitorTypes communicator, shared IConfiguration!VarMonitorTypes configuration, shared IPuppeteerLogger logger)
+    this(scope shared ICommunicator!VarMonitorTypes communicator, shared IConfiguration!VarMonitorTypes configuration, scope shared IPuppeteerLogger logger)
     {
         this.communicator = communicator;
         this.config = configuration;
         this.logger = logger;
+    }
+
+    ~this()
+    {
+        destroy(logger);
     }
 
     public void addPinListener(ubyte pin, pinListenerDelegate listener)

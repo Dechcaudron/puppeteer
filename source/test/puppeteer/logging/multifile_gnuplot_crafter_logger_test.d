@@ -7,7 +7,7 @@ mixin template test()
 
     unittest
     {
-        auto logger = new shared MultifileGnuplotCrafterLogger("test_out/");
+        auto logger = new shared MultifileGnuplotCrafterLogger!(10)("test_out/");
 
         logger.logSensor(0, "var1", "", "3");
         logger.logSensor(3, "var2", "", "4");

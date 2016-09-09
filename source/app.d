@@ -21,6 +21,8 @@ immutable string loggerTidName = "loggerTid";
 
 void main(string[] args)
 {
+	scope(exit) writeln("Program finished");
+
 	string devFilename = "";
 	string loggingFilename = "puppeteerOut.txt";
 
@@ -38,7 +40,7 @@ void main(string[] args)
 	{
 		import puppeteer.logging.multifile_gnuplot_crafter_logger;
 
-		logger = new shared MultifileGnuplotCrafterLogger("gnuplot/");
+		logger = new shared MultifileGnuplotCrafterLogger!(5)("gnuplot/");
 	}
 	else
 	{
@@ -47,9 +49,11 @@ void main(string[] args)
 		logger = new shared PuppeteerLogger(loggingFilename);
 	}
 
-	auto demoPuppeteer = new shared Puppeteer!short(new shared Communicator!short,
+	scope auto demoPuppeteer = new shared Puppeteer!short(new shared Communicator!short,
 	 							new shared Configuration!short,
 								logger);
+
+	scope(exit) destroy(demoPuppeteer);
 
 	void showMenu()
 	{
