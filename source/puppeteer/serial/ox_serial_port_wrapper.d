@@ -11,6 +11,12 @@ class OxSerialPortWrapper : ISerialPort
 {
 	private OxSerialPort port;
 
+    @property
+    public bool isOpen()
+    {
+        return port.isOpen;
+    }
+
 	this(string filename, Parity parity, BaudRate baudRate, uint timeOutMilliseconds)
 	{
 		OnyxParity mapParity(Parity parity)

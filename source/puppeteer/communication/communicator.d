@@ -16,7 +16,7 @@ import std.conv;
 import core.thread;
 import core.atomic;
 
-shared class Communicator(VarMonitorTypes...) : ICommunicator!VarMonitorTypes
+shared class Communicator(IVTypes...) : ICommunicator!IVTypes
 {
     static int next_id = 0;
     private int id;
@@ -43,14 +43,14 @@ shared class Communicator(VarMonitorTypes...) : ICommunicator!VarMonitorTypes
         return workerTid != Tid.init;
     }
 
-    protected Puppeteer!VarMonitorTypes connectedPuppeteer;
+    protected Puppeteer!IVTypes connectedPuppeteer;
 
     this()
     {
         id = next_id++;
     }
 
-    public bool startCommunication(shared Puppeteer!VarMonitorTypes puppeteer, string devFilename, BaudRate baudRate, Parity parity, string logFilename)
+    public bool startCommunication(shared Puppeteer!IVTypes puppeteer, string devFilename, BaudRate baudRate, Parity parity, string logFilename)
     {
         enforce!CommunicationException(!isCommunicationOngoing);
 
@@ -85,7 +85,7 @@ shared class Communicator(VarMonitorTypes...) : ICommunicator!VarMonitorTypes
                                             PinMonitorMessage.Action.stop, pin));
     }
 
-    mixin(unrollChangeVarMonitorStatusMethods!VarMonitorTypes);
+    mixin(unrollChangeVarMonitorStatusMethods!IVTypes);
     public void changeVarMonitorStatus(VarType)(ubyte varIndex, bool shouldMonitor)
     {
         enforceCommunicationOngoing();
@@ -102,83 +102,20 @@ shared class Communicator(VarMonitorTypes...) : ICommunicator!VarMonitorTypes
         workerTid.send(SetPWMMessage(pin, pwmValue));
     }
 
-    private void communicationLoop(string fileName, immutable BaudRate baudRate, immutable Parity parity, string logFilename)
+    private void communicationLoop(PuppetLinkT)(string fileName, immutable BaudRate baudRate, immutable Parity parity, string logFilename)
+    if(isPuppetLink!(PuppetLinkT, IVTypes))
     {
         enum receiveTimeoutMs = 10;
         enum bytesReadAtOnce = 1;
 
-        enum ubyte commandControlByte = 0xff;
+        IPuppetLink puppetLink = new PuppetLinkT(fileName);
 
-        bool shouldContinue = true;
-
-        ISerialPort arduinoSerialPort;
-
-        void handlePinMonitorMessage(PinMonitorMessage msg)
+        if(puppetLink.startCommunication())
+            ownerTid.send(CommunicationEstablishedMessage(true));
+        else
         {
-            void sendStartMonitoringPinCmd(ISerialPort serialPort, ubyte pin)
-            {
-                debug writeln("Sending startMonitoringCommand for pin "~to!string(pin));
-                serialPort.write([commandControlByte, 0x01, pin]);
-            }
-
-            void sendStopMonitoringPinCmd(ISerialPort serialPort, ubyte pin)
-            {
-                debug writeln("Sending stopMonitoringCommand for pin "~to!string(pin));
-                serialPort.write([commandControlByte, 0x02, pin]);
-            }
-
-            final switch(msg.action) with (PinMonitorMessage.Action)
-            {
-                case start:
-                    sendStartMonitoringPinCmd(arduinoSerialPort, msg.pin);
-                    break;
-
-                case stop:
-                    sendStopMonitoringPinCmd(arduinoSerialPort, msg.pin);
-                    break;
-            }
-        }
-
-        void handleEndCommunicationMessage(EndCommunicationMessage msg)
-        {
-            shouldContinue = false;
-        }
-
-        void handleVarMonitorMessage(VarMonitorMessage msg)
-        {
-            void sendStartMonitoringVariableCmd(ISerialPort serialPort, VarMonitorTypeCode typeCode, byte varIndex)
-            {
-                debug writeln("Sending startMonitoringVariableCommand for type ", typeCode, " and index ", varIndex);
-                serialPort.write([commandControlByte, 0x05, typeCode, varIndex]);
-            }
-
-            void sendStopMonitoringVariableCmd(ISerialPort serialPort, VarMonitorTypeCode typeCode, byte varIndex)
-            {
-                debug writeln("Sending stopMonitoringVariableCommand for type ", typeCode, " and index ", varIndex);
-                serialPort.write([commandControlByte, 0x06, typeCode, varIndex]);
-            }
-
-            final switch(msg.action) with (VarMonitorMessage.Action)
-            {
-                case start:
-                    sendStartMonitoringVariableCmd(arduinoSerialPort, msg.varTypeCode, msg.varIndex);
-                    break;
-
-                case stop:
-                    sendStopMonitoringVariableCmd(arduinoSerialPort, msg.varTypeCode, msg.varIndex);
-                    break;
-            }
-        }
-
-        void handleSetPWMMessage(SetPWMMessage msg)
-        {
-            void sendSetPWMCmd(ISerialPort serialPort, ubyte pin, ubyte value)
-            {
-                debug writeln("Sending setPWMCommand for pin "~to!string(pin)~" and value "~to!string(value));
-                serialPort.write([commandControlByte, 0x04, pin, value]);
-            }
-
-            sendSetPWMCmd(arduinoSerialPort, msg.pin, msg.value);
+            ownerTid.send(CommunicationEstablishedMessage(false));
+            return;
         }
 
         StopWatch timer;
@@ -191,13 +128,6 @@ shared class Communicator(VarMonitorTypes...) : ICommunicator!VarMonitorTypes
         }
         body
         {
-            enum ReadCommands : ubyte
-            {
-                analogMonitor = 0x1,
-                varMonitor = 0x2,
-                error = 0xfe
-            }
-
             void handleAnalogMonitorCommand(ubyte[] command)
             in
             {
@@ -255,7 +185,7 @@ shared class Communicator(VarMonitorTypes...) : ICommunicator!VarMonitorTypes
                     {
                         string str = "switch (typeCode) with (VarMonitorTypeCode) {";
 
-                        foreach(varType; VarMonitorTypes)
+                        foreach(varType; IVTypes)
                         {
                             str ~= "case " ~ to!string(varMonitorTypeCode!varType) ~ ": return &handleData!" ~ varType.stringof ~ ";";
                         }
@@ -279,133 +209,35 @@ shared class Communicator(VarMonitorTypes...) : ICommunicator!VarMonitorTypes
                 }
             }
 
-            static ubyte[] readBuffer = [];
-
-            readBuffer ~= readBytes;
-
-            void popReadBuffer(size_t elements = 1)
-            {
-                readBuffer = readBuffer.length >= elements ? readBuffer[elements..$] : [];
-            }
-
-            if(readBuffer[0] != commandControlByte)
-            {
-                debug writeln("Received corrupt command. Discarding first byte and returning");
-                popReadBuffer();
-                return;
-            }
-
-            if(readBuffer.length < 2)
-                return;
-
-            //Try to make sense out of the readBytes
-            switch(readBuffer[1])
-            {
-                case ReadCommands.analogMonitor:
-                    if(readBuffer.length < 5)
-                        return;
-
-                    handleAnalogMonitorCommand(readBuffer[1..5]);
-                    popReadBuffer(5);
-                    break;
-
-                case ReadCommands.varMonitor:
-                    if(readBuffer.length < 6)
-                        return;
-
-                    handleVarMonitorCommand(readBuffer[1..6]);
-                    popReadBuffer(6);
-                    break;
-
-                case ReadCommands.error:
-                    writeln("Error received!");
-                    break;
-
-                default:
-                    writeln("Unhandled ubyte command received: ", readBuffer[0], ". Cleaning command buffer.");
-                    readBuffer = [];
-            }
-        }
-
-        enum portReadTimeoutMs = 200;
-        arduinoSerialPort = ISerialPort.getInstance(fileName, parity, baudRate, portReadTimeoutMs);
-        if(!arduinoSerialPort.open())
-        {
-            ownerTid.send(CommunicationEstablishedMessage(false));
-            return;
-        }
-
-        //Some puppets seems to need some time between port opening and communication start
-        Thread.sleep(dur!"seconds"(1));
-
-        enum ubyte[] puppeteerReadyCommand = [0x0, 0x0];
-        arduinoSerialPort.write([commandControlByte] ~ puppeteerReadyCommand);
-
-        //Wait for the puppet to answer it is ready
-        {
-            enum ubyte[] puppetReadyCommand = [0x0, 0x0];
-            ubyte[] cache = [];
-            enum msBetweenChecks = 100;
-
-            int readCounter = 0;
-            enum readsUntilFailure = 30;
-
-            while(true)
-            {
-                ubyte[] readBytes = arduinoSerialPort.read(1);
-
-                if(readBytes !is null)
-                {
-                    cache ~= readBytes;
-                    debug writeln("handshake cache is currently ", cache);
-
-                    if(cache.length == 3)
-                    {
-                        if(cache == [commandControlByte] ~ puppetReadyCommand)
-                            break; //Ready!
-                        else
-                            cache = cache[1..$]; //pop front and continue
-                    }
-                }
-
-                if(++readCounter > readsUntilFailure)
-                {
-                    ownerTid.send(CommunicationEstablishedMessage(false));
-                    return;
-                }
-
-                Thread.sleep(dur!"msecs"(msBetweenChecks));
-            }
-        }
-
-        ownerTid.send(CommunicationEstablishedMessage(true));
         timer.start();
+
+        bool shouldContinue = true;
 
         do
         {
-            ubyte[] readBytes = arduinoSerialPort.read(bytesReadAtOnce);
+            puppetLink.readPuppet();
 
-            if(readBytes !is null)
-            {
-                debug(3) writeln("Read bytes ", readBytes);
-                handleReadBytes(readBytes);
-            }
-
-            receiveTimeout(msecs(receiveTimeoutMs), &handleEndCommunicationMessage,
-                    &handlePinMonitorMessage,
-                    &handleVarMonitorMessage,
-                    &handleSetPWMMessage);
+            receiveTimeout(msecs(receiveTimeoutMs),
+                    (EndCommunicationMessage msg)
+                    {
+                        shouldContinue = false;
+                    },
+                    (PinMonitorMessage msg)
+                    {
+                        puppetLink.setAIMonitor(msg.pin, msg.action == PinMonitorMessage.Action.start);
+                    },
+                    (VarMonitorMessage msg)
+                    {
+                        puppetLink.setIVMonitor(msg.varIndex, msg.varTypeCode, msg.action == VarMonitorMessage.Action.start);
+                    },
+                    (SetPWMMessage msg)
+                    {
+                        puppetLink.setPWMOut(msg.pin, msg.value);
+                    });
 
         }while(shouldContinue);
 
-        void sendPuppeteerClosedCmd(ISerialPort serialPort)
-        {
-            debug writeln("Sending puppeteerClosedCommand");
-            serialPort.write([commandControlByte, 0x99]);
-        }
-        sendPuppeteerClosedCmd(arduinoSerialPort);
-
-        arduinoSerialPort.close();
+        puppetLink.endCommunication();
 
         ownerTid.send(CommunicationEndedMessage());
     }

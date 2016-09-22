@@ -1,7 +1,7 @@
-module puppeteer.serial.iserial_port;
+module puppeteer.serial.i_serial_port;
 
-import puppeteer.serial.baud_rate;
-import puppeteer.serial.parity;
+public import puppeteer.serial.baud_rate;
+public import puppeteer.serial.parity;
 import puppeteer.serial.ox_serial_port_wrapper;
 
 interface ISerialPort
@@ -11,6 +11,9 @@ interface ISerialPort
 
 	bool open();
 	void close();
+
+    @property
+    bool isOpen();
 
 	static ISerialPort getInstance(string filename, Parity parity, BaudRate baudRate, uint timeOutMilliseconds)
 	{

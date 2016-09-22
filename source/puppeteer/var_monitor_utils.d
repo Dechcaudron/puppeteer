@@ -4,7 +4,7 @@ import std.typecons;
 import std.meta;
 import std.conv;
 
-package enum VarMonitorTypeCode : byte
+public enum VarMonitorTypeCode : byte
 {
     _short = 0x0,
 }
