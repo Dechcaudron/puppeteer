@@ -3,9 +3,7 @@ module puppeteer.puppeteer;
 import test.puppeteer.puppeteer_test : test;
 mixin test;
 
-public import puppeteer.serial.iserial_port;
-public import puppeteer.serial.baud_rate;
-public import puppeteer.serial.parity;
+public import puppeteer.serial.i_serial_port;
 
 import puppeteer.signal_wrapper;
 import puppeteer.var_monitor_utils;
@@ -14,7 +12,7 @@ import puppeteer.logging.ipuppeteer_logger;
 
 import puppeteer.value_adapter.invalid_adapter_expression_exception;
 
-import puppeteer.communication.icommunicator;
+import puppeteer.communication.is_communicator;
 
 import puppeteer.configuration.iconfiguration;
 
@@ -38,8 +36,8 @@ private alias varMonitorDelegateType(VarType) = AliasSeq!(ubyte, VarType, VarTyp
 @disable
 public alias varMonitorDelegate(VarType) = void delegate (varMonitorDelegateType!VarType) shared;
 
-shared class Puppeteer(VarMonitorTypes...)
-if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
+shared class Puppeteer(CommunicatorT, VarMonitorTypes...)
+if(isCommunicator!(CommunicatorT, VarMonitorTypes) && allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 {
     alias PinSignalWrapper = SignalWrapper!(ubyte, float, float, long);
 
@@ -47,7 +45,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     protected PinSignalWrapper[ubyte] pinSignalWrappers;
     protected mixin(unrollVariableSignalWrappers!VarMonitorTypes());
 
-    protected ICommunicator!VarMonitorTypes communicator;
+    protected CommunicatorT communicator;
 
     protected IConfiguration!VarMonitorTypes config;
 
@@ -67,7 +65,7 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
         return communicator.isCommunicationOngoing;
     }
 
-    this(scope shared ICommunicator!VarMonitorTypes communicator, shared IConfiguration!VarMonitorTypes configuration, scope shared IPuppeteerLogger logger)
+    this(scope shared CommunicatorT communicator, shared IConfiguration!VarMonitorTypes configuration, scope shared IPuppeteerLogger logger)
     {
         this.communicator = communicator;
         this.config = configuration;

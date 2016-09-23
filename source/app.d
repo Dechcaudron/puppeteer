@@ -49,7 +49,7 @@ void main(string[] args)
 		logger = new shared PuppeteerLogger(loggingFilename);
 	}
 
-	scope auto demoPuppeteer = new shared Puppeteer!short(new shared Communicator!short,
+	scope auto demoPuppeteer = new shared Puppeteer!(Communicator!short, short)(new shared Communicator!short,
 	 							new shared Configuration!short,
 								logger);
 
@@ -82,7 +82,7 @@ void main(string[] args)
 			writeln(to!string(int(option)) ~ " - " ~ optionMsg);
 		}
 
-		auto listener = new shared DummyListener!short(demoPuppeteer);
+		auto listener = new shared DummyListener!(typeof(demoPuppeteer))(demoPuppeteer);
 
 		void addPinMonitor()
 		{

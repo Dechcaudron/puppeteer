@@ -10,16 +10,16 @@ enum isPuppetLink(T, AIMonitorListenerT, IVMonitorListenerT, IVTypes...) = is(ty
     puppetLink.startCommunication();
     puppetLink.endCommunication();
 
-    puppetLink.readPuppet();
+    puppetLink.readPuppet(long.init /* communicationMsTime */);
 
     puppetLink.isCommunicationOpen is bool.init;
 
     puppetLink.setAIMonitor(ubyte.init /* pin */, bool.init /* monitor */);
-    puppetLink.setAIMonitorListener(AIMonitorListenerT.init /* listener */);
+    puppetLink.AIMonitorListener = AIMonitorListenerT.init /* listener */;
 
     foreach(IVType; IVTypes)
         puppetLink.setIVMonitor!IVType(ubyte.init /* var index */, bool.init /* monitor */);
-    puppetLink.setIVMonitorListener(IVMonitorListenerT.init /* listener */);
+    puppetLink.IVMonitorListener = IVMonitorListenerT.init /* listener */;
 
     puppetLink.setPWMOut(ubyte.init /* pin */, ubyte.init /* value */);
 }

@@ -6,17 +6,19 @@ import puppeteer.var_monitor_utils;
 import puppeteer.communication.icommunicator;
 import puppeteer.communication.communicator_messages;
 import puppeteer.communication.communication_exception;
+import puppeteer.communication.is_value_emitter;
 
 import std.stdio;
 import std.exception;
 import std.concurrency;
 import std.datetime;
 import std.conv;
+import std.meta;
 
 import core.thread;
 import core.atomic;
 
-shared class Communicator(IVTypes...) : ICommunicator!IVTypes
+shared class Communicator(ValueEmitterT, IVTypes...)
 {
     static int next_id = 0;
     private int id;
@@ -24,7 +26,7 @@ shared class Communicator(IVTypes...) : ICommunicator!IVTypes
     @property
     private string workerTidName()
     {
-        enum nameBase = "puppeteer.communicator";
+        enum nameBase = "valueEmitter.communicator";
 
         return nameBase ~ to!string(id);
     }
@@ -43,26 +45,36 @@ shared class Communicator(IVTypes...) : ICommunicator!IVTypes
         return workerTid != Tid.init;
     }
 
-    protected Puppeteer!IVTypes connectedPuppeteer;
+    private void enforceCommunicationOngoing()
+    {
+        enforce(isCommunicationOngoing);
+    }
+
+    protected ValueEmitterT connectedValueEmitter;
 
     this()
     {
         id = next_id++;
     }
 
-    public bool startCommunication(shared Puppeteer!IVTypes puppeteer, string devFilename, BaudRate baudRate, Parity parity, string logFilename)
+    public bool startCommunication(ValueEmitterT, PuppetLinkT = PuppetLink)(shared ValueEmitterT valueEmitter,
+                                                                            string devFilename,
+                                                                            BaudRate baudRate,
+                                                                            Parity parity,
+                                                                            string logFilename)
+    if(isValueEmitter!(ValueEmitterT, IVTypes) && isPuppetLink!PuppetLinkT)
     {
         enforce!CommunicationException(!isCommunicationOngoing);
 
-        connectedPuppeteer = puppeteer;
+        connectedValueEmitter = valueEmitter;
 
-        auto workerTid = spawn(&communicationLoop, devFilename, baudRate, parity, logFilename);
+        auto workerTid = spawn(&communicationLoop!PuppetLinkT, devFilename, baudRate, parity, logFilename);
         register(workerTidName, workerTid);
 
         auto msg = receiveOnly!CommunicationEstablishedMessage();
 
         if(!msg.success)
-            connectedPuppeteer = null;
+            connectedValueEmitter = ValueEmitterT.init;
 
         return msg.success;
     }
@@ -74,10 +86,10 @@ shared class Communicator(IVTypes...) : ICommunicator!IVTypes
         workerTid.send(EndCommunicationMessage());
         receiveOnly!CommunicationEndedMessage();
 
-        connectedPuppeteer = null;
+        connectedValueEmitter = ValueEmitterT.init;
     }
 
-    public void changeAIMonitorStatus(ubyte pin, bool shouldMonitor)
+    public void setAIMonitor(ubyte pin, bool shouldMonitor)
     {
         enforceCommunicationOngoing();
         workerTid.send(PinMonitorMessage(shouldMonitor ?
@@ -85,15 +97,15 @@ shared class Communicator(IVTypes...) : ICommunicator!IVTypes
                                             PinMonitorMessage.Action.stop, pin));
     }
 
-    mixin(unrollChangeVarMonitorStatusMethods!IVTypes);
-    public void changeVarMonitorStatus(VarType)(ubyte varIndex, bool shouldMonitor)
+    public void setIVMonitor(IVType)(ubyte varIndex, bool shouldMonitor)
+    if(staticIndexOf!(IVType, IVTypes) != -1)
     {
         enforceCommunicationOngoing();
         workerTid.send(VarMonitorMessage(shouldMonitor ?
                                             VarMonitorMessage.Action.start :
                                             VarMonitorMessage.Action.stop,
                                             varIndex,
-                                            varMonitorTypeCode!VarType));
+                                            varMonitorTypeCode!IVType));
     }
 
     public void setPWMValue(ubyte pin, ubyte pwmValue)
@@ -109,6 +121,8 @@ shared class Communicator(IVTypes...) : ICommunicator!IVTypes
         enum bytesReadAtOnce = 1;
 
         IPuppetLink puppetLink = new PuppetLinkT(fileName);
+        puppetLink.AIMonitorListener = this;
+        puppetLink.IVMonitorListener = this;
 
         if(puppetLink.startCommunication())
             ownerTid.send(CommunicationEstablishedMessage(true));
@@ -118,104 +132,13 @@ shared class Communicator(IVTypes...) : ICommunicator!IVTypes
             return;
         }
 
-        StopWatch timer;
-
-        void handleReadBytes(ubyte[] readBytes)
-        in
-        {
-            assert(readBytes !is null);
-            assert(readBytes.length != 0);
-        }
-        body
-        {
-            void handleAnalogMonitorCommand(ubyte[] command)
-            in
-            {
-                assert(command !is null);
-                assert(command.length == 4);
-                assert(command[0] == ReadCommands.analogMonitor);
-            }
-            body
-            {
-                long readMilliseconds = timer.peek().msecs;
-
-                debug(2) writeln("Handling analogMonitorCommand ", command);
-
-                ubyte pin = command[1];
-
-                enum arduinoAnalogReadMax = 1023;
-                enum arduinoAnalogReference = 5;
-                enum ubytePossibleValues = 256;
-
-                ushort encodedValue = command[2] * ubytePossibleValues + command[3];
-                float readValue =  arduinoAnalogReference * to!float(encodedValue) / arduinoAnalogReadMax;
-
-                connectedPuppeteer.emitAIRead(pin, readValue, readMilliseconds);
-            }
-
-            void handleVarMonitorCommand(ubyte[] command)
-            in
-            {
-                assert(command !is null);
-                assert(command.length == 5);
-                assert(command[0] == ReadCommands.varMonitor);
-            }
-            body
-            {
-                long readMilliseconds = timer.peek().msecs;
-                debug(2) writeln("Handling varMonitorCommand ", command);
-
-                void handleData(VarType)(ubyte varIndex, ubyte[] data)
-                if(connectedPuppeteer.canMonitor!VarType)
-                {
-                    VarType decodeData(VarType : short)(ubyte[] data) pure
-                    {
-                        enum ubytePossibleValues = 256;
-                        return to!short(data[0] * ubytePossibleValues + data[1]);
-                    }
-
-                    auto receivedData = decodeData!VarType(data);
-
-                    connectedPuppeteer.emitVarRead!VarType(varIndex, receivedData, timer.peek().msecs);
-                }
-
-                void delegate (ubyte, ubyte[]) selectDelegate(VarMonitorTypeCode typeCode)
-                {
-                    string generateSwitch()
-                    {
-                        string str = "switch (typeCode) with (VarMonitorTypeCode) {";
-
-                        foreach(varType; IVTypes)
-                        {
-                            str ~= "case " ~ to!string(varMonitorTypeCode!varType) ~ ": return &handleData!" ~ varType.stringof ~ ";";
-                        }
-
-                        str ~= "default: return null; }" ;
-
-                        return str;
-                    }
-
-                    mixin(generateSwitch());
-                }
-
-                try
-                {
-                    auto handler = selectDelegate(to!VarMonitorTypeCode(command[1]));
-                    if(handler)
-                        handler(command[2], command[3..$]);
-                }catch(ConvException e)
-                {
-                    writeln("Received invalid varMonitor type: ",e);
-                }
-            }
-
-        timer.start();
+        StopWatch communicationStopWatch(AutoStart.yes);
 
         bool shouldContinue = true;
 
         do
         {
-            puppetLink.readPuppet();
+            puppetLink.readPuppet(communicationStopWatch.peek());
 
             receiveTimeout(msecs(receiveTimeoutMs),
                     (EndCommunicationMessage msg)
@@ -238,7 +161,21 @@ shared class Communicator(IVTypes...) : ICommunicator!IVTypes
         }while(shouldContinue);
 
         puppetLink.endCommunication();
+        communicationStopWatch.stop();
 
         ownerTid.send(CommunicationEndedMessage());
+    }
+
+    void onAIUpdate(ubyte pin, float value, long communicationMillisTime)
+    {
+        enforce(isCommunicationOngoing);
+        connectedValueEmitter.emitAIRead(pin, value, communicationMillisTime);
+    }
+
+    void onIVUpdate(IVType)(ubyte varIndex, IVType value, long communicationMillisTime)
+    if(staticIndexOf!(IVType, IVTypes))
+    {
+        enforce(isCommunicationOngoing);
+        connectedValueEmitter.emitVarRead!IVType(varIndex, value, communicationMillisTime);
     }
 }

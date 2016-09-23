@@ -1,6 +1,6 @@
 module puppeteer.serial.ox_serial_port_wrapper;
 
-import puppeteer.serial.iserial_port;
+import puppeteer.serial.i_serial_port;
 import puppeteer.serial.baud_rate;
 import puppeteer.serial.parity;
 

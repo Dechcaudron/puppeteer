@@ -1,10 +1,10 @@
 import puppeteer.puppeteer;
 
-shared class DummyListener(T...)
+shared class DummyListener(PuppeteerT)
 {
-	Puppeteer!T puppeteer;
+	PuppeteerT puppeteer;
 
-	this(shared Puppeteer!T puppeteer)
+	this(PuppeteerT puppeteer)
 	{
 		this.puppeteer = puppeteer;
 	}
