@@ -3,10 +3,12 @@ module puppeteer.communication.communicator;
 import puppeteer.puppeteer;
 import puppeteer.var_monitor_utils;
 
-import puppeteer.communication.icommunicator;
 import puppeteer.communication.communicator_messages;
 import puppeteer.communication.communication_exception;
-import puppeteer.communication.is_value_emitter;
+import puppeteer.communication.is_communicator;
+
+import puppeteer.puppet_link.puppet_link;
+import puppeteer.puppet_link.is_puppet_link;
 
 import std.stdio;
 import std.exception;
@@ -18,8 +20,10 @@ import std.meta;
 import core.thread;
 import core.atomic;
 
-shared class Communicator(ValueEmitterT, IVTypes...)
+shared class Communicator(IVTypes...)
 {
+    /* Ugly fix for allowing different instances */
+
     static int next_id = 0;
     private int id;
 
@@ -39,6 +43,14 @@ shared class Communicator(ValueEmitterT, IVTypes...)
 
     /* End of ugly fix */
 
+    private OnAIUpdateCallback onAIUpdateCallback;
+
+    // Generate onIVUpdateCallback fields for IVTypes
+    private mixin(unrollOnIVUpdateCallbackFields!IVTypes());
+
+    // Alias the previous fields
+    alias onIVUpdateCallback(IVType) = Alias!(mixin(onIVUpdateCallbackFieldName!IVType));
+
     @property
     public bool isCommunicationOngoing()
     {
@@ -50,31 +62,26 @@ shared class Communicator(ValueEmitterT, IVTypes...)
         enforce(isCommunicationOngoing);
     }
 
-    protected ValueEmitterT connectedValueEmitter;
-
     this()
     {
         id = next_id++;
     }
 
-    public bool startCommunication(ValueEmitterT, PuppetLinkT = PuppetLink)(shared ValueEmitterT valueEmitter,
-                                                                            string devFilename,
-                                                                            BaudRate baudRate,
-                                                                            Parity parity,
-                                                                            string logFilename)
-    if(isValueEmitter!(ValueEmitterT, IVTypes) && isPuppetLink!PuppetLinkT)
+    public bool startCommunication(PuppetLinkT = PuppetLink!(shared typeof(this),
+                                                             shared typeof(this),
+                                                             IVTypes))
+                                                             (string devFilename,
+                                                             BaudRate baudRate,
+                                                             Parity parity,
+                                                             string logFilename)
+    if(isPuppetLink!(PuppetLinkT, shared typeof(this), shared typeof(this), IVTypes))
     {
         enforce!CommunicationException(!isCommunicationOngoing);
-
-        connectedValueEmitter = valueEmitter;
 
         auto workerTid = spawn(&communicationLoop!PuppetLinkT, devFilename, baudRate, parity, logFilename);
         register(workerTidName, workerTid);
 
         auto msg = receiveOnly!CommunicationEstablishedMessage();
-
-        if(!msg.success)
-            connectedValueEmitter = ValueEmitterT.init;
 
         return msg.success;
     }
@@ -85,8 +92,6 @@ shared class Communicator(ValueEmitterT, IVTypes...)
 
         workerTid.send(EndCommunicationMessage());
         receiveOnly!CommunicationEndedMessage();
-
-        connectedValueEmitter = ValueEmitterT.init;
     }
 
     public void setAIMonitor(ubyte pin, bool shouldMonitor)
@@ -106,6 +111,16 @@ shared class Communicator(ValueEmitterT, IVTypes...)
                                             VarMonitorMessage.Action.stop,
                                             varIndex,
                                             varMonitorTypeCode!IVType));
+    }
+
+    public void setOnAIUpdateCallback(OnAIUpdateCallback callback)
+    {
+        onAIUpdateCallback = callback;
+    }
+
+    public void setOnIVUpdateCallback(IVType)(OnIVUpdateCallback!IVType callback)
+    {
+        onIVUpdateCallback!IVType = callback;
     }
 
     public void setPWMValue(ubyte pin, ubyte pwmValue)
@@ -169,13 +184,29 @@ shared class Communicator(ValueEmitterT, IVTypes...)
     void onAIUpdate(ubyte pin, float value, long communicationMillisTime)
     {
         enforce(isCommunicationOngoing);
-        connectedValueEmitter.emitAIRead(pin, value, communicationMillisTime);
+
+        if(onAIUpdateCallback !is typeof(onAIUpdateCallback).init)
+            onAIUpdateCallback(pin, value, communicationMillisTime);
     }
 
     void onIVUpdate(IVType)(ubyte varIndex, IVType value, long communicationMillisTime)
-    if(staticIndexOf!(IVType, IVTypes))
+    if(staticIndexOf!(IVType, IVTypes) !is -1)
     {
         enforce(isCommunicationOngoing);
-        connectedValueEmitter.emitVarRead!IVType(varIndex, value, communicationMillisTime);
+
+        if(onIVUpdateCallback!IVType !is typeof(onIVUpdateCallback!IVType).init)
+            onIVUpdateCallback!IVType(varIndex, value, communicationMillisTime);
     }
+}
+
+private enum onIVUpdateCallbackFieldName(T) = format("_onIVUpdateCallback__Communicator_Internal_%s", T.stringof);
+
+private pure string unrollOnIVUpdateCallbackFields(Ts...)()
+{
+    string str = "";
+    foreach(T; Ts)
+        str ~= format("OnIVUpdateCallback!%s %s;\n",
+                        T.stringof, onIVUpdateCallbackFieldName!T);
+
+    return str;
 }

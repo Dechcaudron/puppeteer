@@ -3,6 +3,7 @@ module puppeteer.puppet_link.puppet_link;
 import std.file;
 import std.exception;
 import std.format;
+import std.conv;
 
 import core.thread;
 
@@ -14,27 +15,27 @@ import puppeteer.puppet_link.is_iv_monitor_listener;
 
 
 public class PuppetLink(AIMonitorListenerT, IVMonitorListenerT, IVTypes...)
-if(isAIMonitorListener!AIMonitorListenerT && isIVMonitorListener!IVMonitorListenerT)
+if(isAIMonitorListener!AIMonitorListenerT && isIVMonitorListener!(IVMonitorListenerT, IVTypes))
 {
     private ISerialPort serialPort;
 
-    private AIMonitorListenerT AIMonitorListener;
+    private AIMonitorListenerT _AIMonitorListener;
 
     @property
     AIMonitorListener(AIMonitorListenerT listener)
     {
-        AIMonitorListener = listener;
+        _AIMonitorListener = listener;
     }
 
-    private IVMonitorListenerT IVMonitorListener;
+    private IVMonitorListenerT _IVMonitorListener;
 
     @property
     IVMonitorListener(IVMonitorListenerT listener)
     {
-        IVMonitorListener = listener;
+        _IVMonitorListener = listener;
     }
 
-    private enum byte commandControlByte = 0xff;
+    private enum ubyte commandControlByte = 0xff;
 
     @property
     bool isCommunicationOpen()
@@ -197,7 +198,7 @@ if(isAIMonitorListener!AIMonitorListenerT && isIVMonitorListener!IVMonitorListen
     {
         debug(2) writeln("Handling analogMonitorCommand ", command);
 
-        if(AIMonitorListener is AIMonitorListenerT.init)
+        if(_AIMonitorListener is AIMonitorListenerT.init)
             return;
 
         ubyte pin = command[1];
@@ -209,7 +210,7 @@ if(isAIMonitorListener!AIMonitorListenerT && isIVMonitorListener!IVMonitorListen
         ushort encodedValue = command[2] *possibleValues + command[3];
         float readValue =  analogReference * to!float(encodedValue) / analogReadMax;
 
-        AIMonitorListener.onAIUpdate(pin, readValue, communicationMsTime);
+        _AIMonitorListener.onAIUpdate(pin, readValue, communicationMsTime);
     }
 
     private void handleVarMonitorCommand(ubyte[] cmd, long communicationMsTime)
@@ -268,7 +269,7 @@ if(isAIMonitorListener!AIMonitorListenerT && isIVMonitorListener!IVMonitorListen
 
         auto decodedData = decodeData!IVType(data);
 
-        IVMonitorListener.onIVUpdate(varIndex, decodedData, communicationMsTime);
+        _IVMonitorListener.onIVUpdate(varIndex, decodedData, communicationMsTime);
     }
 
     private enum ReadCommands : ubyte

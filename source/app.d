@@ -49,7 +49,7 @@ void main(string[] args)
 		logger = new shared PuppeteerLogger(loggingFilename);
 	}
 
-	scope auto demoPuppeteer = new shared Puppeteer!(Communicator!short, short)(new shared Communicator!short,
+	scope auto demoPuppeteer = new shared Puppeteer!(shared Communicator!short, short)(new shared Communicator!short,
 	 							new shared Configuration!short,
 								logger);
 

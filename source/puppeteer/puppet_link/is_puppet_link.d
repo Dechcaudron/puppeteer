@@ -10,7 +10,7 @@ enum isPuppetLink(T, AIMonitorListenerT, IVMonitorListenerT, IVTypes...) = is(ty
     puppetLink.startCommunication();
     puppetLink.endCommunication();
 
-    puppetLink.readPuppet(long.init /* communicationMsTime */);
+    puppetLink.readPuppet(long.init /* communicationTimeMillis */);
 
     puppetLink.isCommunicationOpen is bool.init;
 

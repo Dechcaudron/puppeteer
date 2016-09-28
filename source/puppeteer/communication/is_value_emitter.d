@@ -1,6 +1,6 @@
 module puppeteer.communication.is_value_emitter;
 
-enum isValueEmitter(T, IVTs) = __traits(compiles,
+enum isValueEmitter(T, IVTs) = is(typeof(
 {
     T emitter;
 
@@ -12,4 +12,4 @@ enum isValueEmitter(T, IVTs) = __traits(compiles,
         emitter.emitIVRead!IVT(ubyte.init /* varIndex */,
                                 IVT.init /* value */,
                                 long.init /* communicationMillisTime */);
-}());
+}()));;
