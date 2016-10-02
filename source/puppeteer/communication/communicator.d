@@ -22,6 +22,8 @@ import core.atomic;
 
 shared class Communicator(IVTypes...)
 {
+    static assert(isCommunicator!(shared typeof(this), IVTypes));
+
     /* Ugly fix for allowing different instances */
 
     static int next_id = 0;
@@ -67,14 +69,14 @@ shared class Communicator(IVTypes...)
         id = next_id++;
     }
 
-    public bool startCommunication(PuppetLinkT = PuppetLink!(shared typeof(this),
+    public final bool startCommunication(PuppetLinkT = PuppetLink!(shared typeof(this),
                                                              shared typeof(this),
                                                              IVTypes))
                                                              (string devFilename,
                                                              BaudRate baudRate,
                                                              Parity parity,
                                                              string logFilename)
-    if(isPuppetLink!(PuppetLinkT, shared typeof(this), shared typeof(this), IVTypes))
+    if(isPuppetLink!(PuppetLinkT, shared typeof(this), shared typeof(this)))
     {
         enforce!CommunicationException(!isCommunicationOngoing);
 
@@ -130,12 +132,12 @@ shared class Communicator(IVTypes...)
     }
 
     private void communicationLoop(PuppetLinkT)(string fileName, immutable BaudRate baudRate, immutable Parity parity, string logFilename)
-    if(isPuppetLink!(PuppetLinkT, IVTypes))
+    if(isPuppetLink!(PuppetLinkT, shared typeof(this), shared typeof(this)))
     {
         enum receiveTimeoutMs = 10;
         enum bytesReadAtOnce = 1;
 
-        IPuppetLink puppetLink = new PuppetLinkT(fileName);
+        PuppetLinkT puppetLink = new PuppetLinkT(fileName);
         puppetLink.AIMonitorListener = this;
         puppetLink.IVMonitorListener = this;
 
@@ -147,13 +149,16 @@ shared class Communicator(IVTypes...)
             return;
         }
 
-        StopWatch communicationStopWatch(AutoStart.yes);
+        puppetLink.AIMonitorListener = this;
+        puppetLink.IVMonitorListener = this;
+
+        StopWatch communicationStopWatch = StopWatch(AutoStart.yes);
 
         bool shouldContinue = true;
 
         do
         {
-            puppetLink.readPuppet(communicationStopWatch.peek());
+            puppetLink.readPuppet(communicationStopWatch.peek().msecs);
 
             receiveTimeout(msecs(receiveTimeoutMs),
                     (EndCommunicationMessage msg)
@@ -166,7 +171,7 @@ shared class Communicator(IVTypes...)
                     },
                     (VarMonitorMessage msg)
                     {
-                        puppetLink.setIVMonitor(msg.varIndex, msg.varTypeCode, msg.action == VarMonitorMessage.Action.start);
+                        puppetLink.setIVMonitor(msg.varTypeCode, msg.varIndex, msg.action == VarMonitorMessage.Action.start);
                     },
                     (SetPWMMessage msg)
                     {

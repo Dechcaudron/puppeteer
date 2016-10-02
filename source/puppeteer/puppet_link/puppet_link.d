@@ -4,19 +4,24 @@ import std.file;
 import std.exception;
 import std.format;
 import std.conv;
+import std.stdio;
 
 import core.thread;
 
 import puppeteer.serial.i_serial_port;
+import puppeteer.serial.ox_serial_port_wrapper;
+
 import puppeteer.var_monitor_utils;
 
+import puppeteer.puppet_link.is_puppet_link;
 import puppeteer.puppet_link.is_ai_monitor_listener;
 import puppeteer.puppet_link.is_iv_monitor_listener;
-
 
 public class PuppetLink(AIMonitorListenerT, IVMonitorListenerT, IVTypes...)
 if(isAIMonitorListener!AIMonitorListenerT && isIVMonitorListener!(IVMonitorListenerT, IVTypes))
 {
+    static assert(isPuppetLink!(typeof(this), AIMonitorListenerT, IVMonitorListenerT));
+
     private ISerialPort serialPort;
 
     private AIMonitorListenerT _AIMonitorListener;
@@ -54,7 +59,7 @@ if(isAIMonitorListener!AIMonitorListenerT && isIVMonitorListener!(IVMonitorListe
         enforce(isFile(devFileName));
 
         enum portReadTimeoutMs = 200;
-        serialPort = new SerialPort(devFileName, Parity.none, BaudRate.B9600, portReadTimeoutMs);
+        serialPort = new OxSerialPortWrapper(devFileName, Parity.none, BaudRate.B9600, portReadTimeoutMs);
     }
 
     bool startCommunication()
@@ -64,10 +69,10 @@ if(isAIMonitorListener!AIMonitorListenerT && isIVMonitorListener!(IVMonitorListe
             //Some puppets seems to need some time between port opening and communication start
             Thread.sleep(dur!"seconds"(1));
 
-            enum byte[] puppeteerReadyCommand = [0x0, 0x0];
+            enum ubyte[] puppeteerReadyCommand = [0x0, 0x0];
             serialPort.write([commandControlByte] ~ puppeteerReadyCommand);
 
-            enum byte[] puppetReadyCommand = [0x0, 0x0];
+            enum ubyte[] puppetReadyCommand = [0x0, 0x0];
             ubyte[] readCache = [];
 
             enum msBetweenChecks = 100;
@@ -80,23 +85,23 @@ if(isAIMonitorListener!AIMonitorListenerT && isIVMonitorListener!(IVMonitorListe
 
                 if(readBytes !is null)
                 {
-                    cache ~= readBytes;
-                    debug writeln("handshake cache is currently ", cache);
+                    readCache ~= readBytes;
+                    debug writeln("handshake cache is currently ", readCache);
 
-                    if(cache.length == 3)
+                    if(readCache.length == 3)
                     {
-                        if(cache == [commandControlByte] ~ puppetReadyCommand)
+                        if(readCache == [commandControlByte] ~ puppetReadyCommand)
                             return true; //Ready!
                         else
-                            cache = cache[1..$]; //pop front and continue
+                            readCache = readCache[1..$]; //pop front and continue
                     }
                 }
 
                 Thread.sleep(dur!"msecs"(msBetweenChecks));
             }
-
-            return false;
         }
+
+        return false;
     }
 
     void endCommunication()
@@ -106,17 +111,20 @@ if(isAIMonitorListener!AIMonitorListenerT && isIVMonitorListener!(IVMonitorListe
 
     void setAIMonitor(ubyte AIPin, bool monitor)
     {
-        serialPort.write([commandControlByte, monitor ? 0x01 : 0x02, pin]);
+        ubyte opCode = monitor ? 0x01 : 0x02;
+        serialPort.write([commandControlByte, opCode, AIPin]);
     }
 
-    void setIVMonitor(IVType)(ubyte IVIndex, bool monitor)
+    void setIVMonitor(VarMonitorTypeCode IVTypeCode, ubyte IVIndex, bool monitor)
     {
-        serialPort.write([commandControlByte, monitor ? 0x05 : 0x06, varMonitorTypeCode!IVType]);
+        ubyte opCode = monitor ? 0x05 : 0x06;
+        serialPort.write([commandControlByte, opCode, IVTypeCode, IVIndex]);
     }
 
     void setPWMOut(ubyte PWMOutPin, ubyte value)
     {
-        serialPort.write([commandControlByte, 0x04, PWMOutPin, value]);
+        ubyte opCode = 0x04;
+        serialPort.write([commandControlByte, opCode, PWMOutPin, value]);
     }
 
     void readPuppet(long communicationMsTime)
@@ -132,21 +140,21 @@ if(isAIMonitorListener!AIMonitorListenerT && isIVMonitorListener!(IVMonitorListe
         }
     }
 
-    private void handleReadBytes(byte[] readBytes, long communicationMsTime)
+    private void handleReadBytes(ubyte[] readBytes, long communicationTimeMillis)
     in
     {
         assert(readBytes !is null);
     }
     body
     {
-        static byte[] readBuffer;
+        static ubyte[] readBuffer;
 
         void popReadBuffer(size_t elements)
         {
-            cache = cache[elements .. $];
+            readBuffer = readBuffer[elements .. $];
         }
 
-        if(readBytes.size > 0)
+        if(readBytes.length > 0)
         {
             readBuffer ~= readBytes;
 
@@ -157,13 +165,13 @@ if(isAIMonitorListener!AIMonitorListenerT && isIVMonitorListener!(IVMonitorListe
             }
             else if (readBuffer.length >= 2)
             {
-                with (ReadCommands) switch(cache[1])
+                with (ReadCommands) switch(readBuffer[1])
                 {
                     case analogMonitor:
                         if(readBuffer.length < 5)
                             return;
 
-                        handleAIMonitorCommand(readBuffer[1 .. 5]);
+                        handleAIMonitorCommand(readBuffer[1 .. 5], communicationTimeMillis);
                         popReadBuffer(5);
                         break;
 
@@ -171,7 +179,7 @@ if(isAIMonitorListener!AIMonitorListenerT && isIVMonitorListener!(IVMonitorListe
                         if(readBuffer.length < 6)
                             return;
 
-                        handleVarMonitorCommand(readBuffer[1..6]);
+                        handleVarMonitorCommand(readBuffer[1..6], communicationTimeMillis);
                         popReadBuffer(6);
                         break;
 
@@ -201,13 +209,13 @@ if(isAIMonitorListener!AIMonitorListenerT && isIVMonitorListener!(IVMonitorListe
         if(_AIMonitorListener is AIMonitorListenerT.init)
             return;
 
-        ubyte pin = command[1];
+        ubyte pin = cmd[1];
 
         enum analogReadMax = 1023;
         enum analogReference = 5;
         enum possibleValues = 256;
 
-        ushort encodedValue = command[2] *possibleValues + command[3];
+        ushort encodedValue = cmd[2] * possibleValues + cmd[3];
         float readValue =  analogReference * to!float(encodedValue) / analogReadMax;
 
         _AIMonitorListener.onAIUpdate(pin, readValue, communicationMsTime);
@@ -224,7 +232,7 @@ if(isAIMonitorListener!AIMonitorListenerT && isIVMonitorListener!(IVMonitorListe
     {
         debug(2) writeln("Handling varMonitorCommand ", cmd);
 
-        void delegate (ubyte, ubyte[]) selectDelegate(VarMonitorTypeCode typeCode)
+        void delegate (ubyte, ubyte[], long) selectDelegate(VarMonitorTypeCode typeCode)
         {
             string generateSwitch()
             {
@@ -261,7 +269,7 @@ if(isAIMonitorListener!AIMonitorListenerT && isIVMonitorListener!(IVMonitorListe
 
     private void handleData(IVType)(ubyte varIndex, ubyte[] data, long communicationMsTime)
     {
-        VarType decodeData(IVType : short)(ubyte[] data) pure
+        IVType decodeData(IVType : short)(ubyte[] data) pure
         {
             enum ubytePossibleValues = 256;
             return to!short(data[0] * ubytePossibleValues + data[1]);

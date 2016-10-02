@@ -37,7 +37,7 @@ private alias varMonitorDelegateType(VarType) = AliasSeq!(ubyte, VarType, VarTyp
 public alias varMonitorDelegate(VarType) = void delegate (varMonitorDelegateType!VarType) shared;
 
 shared class Puppeteer(CommunicatorT, VarMonitorTypes...)
-if(isCommunicator!(CommunicatorT, VarMonitorTypes) && allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
+if(isCommunicator!(CommunicatorT, VarMonitorTypes))// && allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 {
     alias PinSignalWrapper = SignalWrapper!(ubyte, float, float, long);
 
@@ -94,7 +94,7 @@ if(isCommunicator!(CommunicatorT, VarMonitorTypes) && allSatisfy!(isVarMonitorTy
             //No need to synchronize this call since it is the first listener
             signalWrapper.addListener(listener);
 
-            communicator.changeAIMonitorStatus(pin, true);
+            communicator.setAIMonitor(pin, true);
         }
         else
         {
@@ -122,7 +122,7 @@ if(isCommunicator!(CommunicatorT, VarMonitorTypes) && allSatisfy!(isVarMonitorTy
         if(signalWrapper.listenersNumber == 0)
         {
             pinSignalWrappers.remove(pin);
-            communicator.changeAIMonitorStatus(pin, false);
+            communicator.setAIMonitor(pin, false);
         }
     }
 
@@ -148,7 +148,7 @@ if(isCommunicator!(CommunicatorT, VarMonitorTypes) && allSatisfy!(isVarMonitorTy
             signalWrapper.addListener(listener);
             typeSignalWrappers[varIndex] = signalWrapper;
 
-            communicator.changeVarMonitorStatus!VarType(varIndex, true);
+            communicator.setIVMonitor!VarType(varIndex, true);
         }
     }
 
@@ -172,7 +172,7 @@ if(isCommunicator!(CommunicatorT, VarMonitorTypes) && allSatisfy!(isVarMonitorTy
         if(signalWrapper.listenersNumber == 0)
         {
             typeSignalWrappers.remove(varIndex);
-            communicator.changeVarMonitorStatus!VarType(varIndex, false);
+            communicator.setIVMonitor!VarType(varIndex, false);
         }
     }
 
@@ -196,7 +196,7 @@ if(isCommunicator!(CommunicatorT, VarMonitorTypes) && allSatisfy!(isVarMonitorTy
 
     public bool startCommunication(string devFilename, BaudRate baudRate, Parity parity, string logFilename)
     {
-        return communicator.startCommunication(this, devFilename, baudRate, parity, logFilename);
+        return communicator.startCommunication!()(devFilename, baudRate, parity, logFilename);
     }
 
     public void endCommunication()

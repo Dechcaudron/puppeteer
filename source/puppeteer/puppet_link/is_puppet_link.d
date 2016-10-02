@@ -3,7 +3,9 @@ module puppeteer.puppet_link.is_puppet_link;
 import puppeteer.puppet_link.is_ai_monitor_listener;
 import puppeteer.puppet_link.is_iv_monitor_listener;
 
-enum isPuppetLink(T, AIMonitorListenerT, IVMonitorListenerT, IVTypes...) = is(typeof(
+import puppeteer.var_monitor_utils;
+
+enum isPuppetLink(T, AIMonitorListenerT, IVMonitorListenerT) = is(typeof(
 {
     T puppetLink;
 
@@ -12,13 +14,12 @@ enum isPuppetLink(T, AIMonitorListenerT, IVMonitorListenerT, IVTypes...) = is(ty
 
     puppetLink.readPuppet(long.init /* communicationTimeMillis */);
 
-    puppetLink.isCommunicationOpen is bool.init;
+    bool a = puppetLink.isCommunicationOpen;
 
     puppetLink.setAIMonitor(ubyte.init /* pin */, bool.init /* monitor */);
     puppetLink.AIMonitorListener = AIMonitorListenerT.init /* listener */;
 
-    foreach(IVType; IVTypes)
-        puppetLink.setIVMonitor!IVType(ubyte.init /* var index */, bool.init /* monitor */);
+    puppetLink.setIVMonitor(VarMonitorTypeCode.init /* IV type */, ubyte.init /* var index */, bool.init /* monitor */);
     puppetLink.IVMonitorListener = IVMonitorListenerT.init /* listener */;
 
     puppetLink.setPWMOut(ubyte.init /* pin */, ubyte.init /* value */);

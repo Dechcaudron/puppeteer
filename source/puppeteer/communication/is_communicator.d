@@ -5,12 +5,12 @@ import puppeteer.puppeteer;
 alias OnAIUpdateCallback = void delegate (ubyte /* pin */, float /* value */, long /* communicationTimeMillis */) shared ;
 alias OnIVUpdateCallback(T) = void delegate (ubyte /* varIndex */, T /* value */, long /* communicationTimeMillis */) shared;
 
-enum isCommunicator(T, IVTypes...) = //__traits(compiles,
+enum isCommunicator(T, IVTypes...) = is(typeof(
 {
-    pragma(msg, T.stringof);
     T communicator;
 
-    bool b1 = communicator.startCommunication(string.init /* devFilename */,
+    bool b1 = communicator.startCommunication!( /* this is confusing */ )
+                                              (string.init /* devFilename */,
                                               BaudRate.init,
                                               Parity.init,
                                               string.init /* logFilename */);
@@ -27,6 +27,4 @@ enum isCommunicator(T, IVTypes...) = //__traits(compiles,
     }
 
     communicator.setPWMValue(ubyte.init /* pin */, ubyte.init /* value */);
-    pragma(msg, "end of " ~ T.stringof);
-}
-();
+}()));
