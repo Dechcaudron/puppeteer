@@ -149,9 +149,6 @@ shared class Communicator(IVTypes...)
             return;
         }
 
-        puppetLink.AIMonitorListener = this;
-        puppetLink.IVMonitorListener = this;
-
         StopWatch communicationStopWatch = StopWatch(AutoStart.yes);
 
         bool shouldContinue = true;
