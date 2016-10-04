@@ -1,6 +1,6 @@
 module puppeteer.logging.puppeteer_logger;
 
-import puppeteer.logging.ipuppeteer_logger;
+import puppeteer.logging.i_puppeteer_logger;
 import puppeteer.logging.basic_logger;
 
 import std.format : format;

@@ -1,6 +1,6 @@
 module test.puppeteer.logging.mock_logger;
 
-import puppeteer.logging.ipuppeteer_logger;
+import puppeteer.logging.i_puppeteer_logger;
 
 public shared class MockLogger : IPuppeteerLogger
 {

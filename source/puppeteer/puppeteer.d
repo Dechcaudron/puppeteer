@@ -8,13 +8,13 @@ public import puppeteer.serial.i_serial_port;
 import puppeteer.signal_wrapper;
 import puppeteer.var_monitor_utils;
 
-import puppeteer.logging.ipuppeteer_logger;
+import puppeteer.logging.i_puppeteer_logger;
 
 import puppeteer.value_adapter.invalid_adapter_expression_exception;
 
 import puppeteer.communication.is_communicator;
 
-import puppeteer.configuration.iconfiguration;
+import puppeteer.configuration.i_configuration;
 
 import std.stdio;
 import std.concurrency;
@@ -37,7 +37,7 @@ private alias varMonitorDelegateType(VarType) = AliasSeq!(ubyte, VarType, VarTyp
 public alias varMonitorDelegate(VarType) = void delegate (varMonitorDelegateType!VarType) shared;
 
 shared class Puppeteer(CommunicatorT, VarMonitorTypes...)
-if(isCommunicator!(CommunicatorT, VarMonitorTypes))// && allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
+if(isCommunicator!(CommunicatorT, VarMonitorTypes) && allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
 {
     alias PinSignalWrapper = SignalWrapper!(ubyte, float, float, long);
 

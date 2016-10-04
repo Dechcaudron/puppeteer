@@ -6,7 +6,7 @@ mixin test;
 import puppeteer.var_monitor_utils;
 import puppeteer.value_adapter.value_adapter;
 
-import puppeteer.configuration.iconfiguration;
+import puppeteer.configuration.i_configuration;
 
 import puppeteer.configuration.invalid_configuration_exception;
 
@@ -32,7 +32,6 @@ if(allSatisfy!(isVarMonitorTypeSupported, VarMonitorTypes))
     protected string[ubyte] AISensorNames;
     protected mixin(unrollVarMonitorSensorNames!VarMonitorTypes());
 
-    //pragma(msg, unrollHelperMethods!VarMonitorTypes());
     mixin(unrollHelperMethods!VarMonitorTypes());
 
     public void setAIValueAdapterExpression(ubyte pin, string adapterExpression)

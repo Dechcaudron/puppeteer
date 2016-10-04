@@ -8,13 +8,8 @@ import std.format;
 
 import dummy_listener;
 
-import puppeteer.puppeteer;
+import puppeteer;
 
-import puppeteer.logging.ipuppeteer_logger;
-
-import puppeteer.communication.communicator;
-
-import puppeteer.configuration.configuration;
 import puppeteer.configuration.invalid_configuration_exception;
 
 immutable string loggerTidName = "loggerTid";
@@ -24,34 +19,17 @@ void main(string[] args)
 	scope(exit) writeln("Program finished");
 
 	string devFilename = "";
-	string loggingFilename = "puppeteerOut.txt";
+	string loggingPath = "puppeteerOut.txt";
 
 	getopt(args,
 		"dev|d", &devFilename,
-		"out|o", &loggingFilename);
+		"out|o", &loggingPath);
 
 	enforce(devFilename != "" && exists(devFilename), "Please select an existing device using --dev [devicePath]");
 
 	writeln("Opening device file " ~ devFilename);
 
-	shared IPuppeteerLogger logger;
-
-	version(gnuplotCrafterLogging)
-	{
-		import puppeteer.logging.multifile_gnuplot_crafter_logger;
-
-		logger = new shared MultifileGnuplotCrafterLogger!(5)("gnuplot/");
-	}
-	else
-	{
-		import puppeteer.logging.puppeteer_logger;
-
-		logger = new shared PuppeteerLogger(loggingFilename);
-	}
-
-	scope auto demoPuppeteer = new shared Puppeteer!(shared Communicator!short, short)(new shared Communicator!short,
-	 							new shared Configuration!short,
-								logger);
+	scope auto demoPuppeteer = getPuppeteer!short();
 
 	scope(exit) destroy(demoPuppeteer);
 

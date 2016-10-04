@@ -2,6 +2,9 @@ module test.puppeteer.puppeteer_test;
 
 mixin template test()
 {
+    version(unittest)
+        import unit_threaded;
+
     import puppeteer.communication.communication_exception;
 
     import puppeteer.configuration.configuration;
@@ -10,22 +13,26 @@ mixin template test()
 
     import test.puppeteer.logging.mock_logger;
 
+    @("Test supported types")
     unittest
     {
-        // Test for supported types
         assert(__traits(compiles, Puppeteer!()));
         assert(__traits(compiles, Puppeteer!short));
         assert(!__traits(compiles, Puppeteer!float));
         assert(!__traits(compiles, Puppeteer!(short, float)));
         assert(!__traits(compiles, Puppeteer!(short, void)));
+    }
 
+    unittest
+    {
         class Foo
         {
             void pinListener(ubyte pin, float receivedValue, float adaptedValue, long msecs) shared {}
             void varListener(T)(ubyte var, T receivedValue, T adaptedValue, long msecs) shared {}
         }
 
-        auto a = new shared Puppeteer!short(new shared BrokenCommunicator!short(), new shared Configuration!short, new shared MockLogger);
+        auto a = new shared Puppeteer!(shared BrokenCommunicator!short, short)
+                                        (new shared BrokenCommunicator!short(), new shared Configuration!short, new shared MockLogger);
         auto foo = new shared Foo;
 
         assertThrown!CommunicationException(a.endCommunication());

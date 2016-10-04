@@ -15,7 +15,17 @@
         {
             "name" : "gnuplot-logs-app",
             "targetType" : "executable",
-            "versions" : ["gnuplotCrafterLogging"]
+            "versions" : ["gnuplotCrafterLogging"],
+        },
+        {
+            "name": "unittest",
+            "targetType" : "executable",
+            "preBuildCommands": ["dub run unit-threaded -c gen_ut_main -- -f bin/ut.d"],
+            "mainSourceFile": "bin/ut.d",
+            "excludedSourceFiles": ["src/app.d"],
+            "dependencies": {
+                "unit-threaded": "~>0.6.0"
+            }
         }
     ],
 

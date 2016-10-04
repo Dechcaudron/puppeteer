@@ -1,10 +1,17 @@
-module puppeteer.configuration.iconfiguration;
+module puppeteer.configuration.i_configuration;
+
+import puppeteer.configuration.configuration;
 
 import std.stdio;
 import std.exception;
 
 public shared interface IConfiguration(VarMonitorTypes...)
 {
+    static auto getInstance()
+    {
+        return new shared Configuration!VarMonitorTypes;
+    }
+
     void setAIValueAdapterExpression(ubyte pin, string adapterExpression);
     string getAIValueAdapterExpression(ubyte pin);
     float adaptAIValue(ubyte pin, float value);

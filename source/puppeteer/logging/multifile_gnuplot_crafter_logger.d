@@ -3,7 +3,7 @@ module puppeteer.logging.multifile_gnuplot_crafter_logger;
 import test.puppeteer.logging.multifile_gnuplot_crafter_logger_test : test;
 mixin test;
 
-import puppeteer.logging.ipuppeteer_logger;
+import puppeteer.logging.i_puppeteer_logger;
 import puppeteer.logging.basic_logger;
 
 import gnuplot_crafter.multithreaded.singlevar_crafter;
