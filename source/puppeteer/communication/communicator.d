@@ -74,13 +74,12 @@ shared class Communicator(IVTypes...)
                                                              IVTypes))
                                                              (string devFilename,
                                                              BaudRate baudRate,
-                                                             Parity parity,
-                                                             string logFilename)
+                                                             Parity parity)
     if(isPuppetLink!(PuppetLinkT, shared typeof(this), shared typeof(this)))
     {
         enforce!CommunicationException(!isCommunicationOngoing);
 
-        auto workerTid = spawn(&communicationLoop!PuppetLinkT, devFilename, baudRate, parity, logFilename);
+        auto workerTid = spawn(&communicationLoop!PuppetLinkT, devFilename, baudRate, parity);
         register(workerTidName, workerTid);
 
         auto msg = receiveOnly!CommunicationEstablishedMessage();
@@ -131,7 +130,7 @@ shared class Communicator(IVTypes...)
         workerTid.send(SetPWMMessage(pin, pwmValue));
     }
 
-    private void communicationLoop(PuppetLinkT)(string fileName, immutable BaudRate baudRate, immutable Parity parity, string logFilename)
+    private void communicationLoop(PuppetLinkT)(string fileName, immutable BaudRate baudRate, immutable Parity parity)
     if(isPuppetLink!(PuppetLinkT, shared typeof(this), shared typeof(this)))
     {
         enum receiveTimeoutMs = 10;

@@ -194,9 +194,9 @@ if(isCommunicator!(CommunicatorT, VarMonitorTypes) && allSatisfy!(isVarMonitorTy
         return to!ubyte(round(averageValue / pwmHigh * ubyte.max));
     }
 
-    public bool startCommunication(string devFilename, BaudRate baudRate, Parity parity, string logFilename)
+    public bool startCommunication(string devFilename, BaudRate baudRate, Parity parity)
     {
-        return communicator.startCommunication!()(devFilename, baudRate, parity, logFilename);
+        return communicator.startCommunication!()(devFilename, baudRate, parity);
     }
 
     public void endCommunication()

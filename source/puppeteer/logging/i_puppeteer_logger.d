@@ -1,7 +1,5 @@
 module puppeteer.logging.i_puppeteer_logger;
 
-import puppeteer.logging.puppeteer_logger;
-import puppeteer.logging.multifile_gnuplot_crafter_logger;
 
 shared interface IPuppeteerLogger
 {
@@ -10,9 +8,20 @@ shared interface IPuppeteerLogger
 
     static auto getInstance(string loggingPath)
     {
-        version(gnuplotCrafterLogging)
+        version(unittest)
+        {
+            import test.puppeteer.logging.mock_logger;
+            return new shared MockLogger;
+        }
+        else version(gnuplotCrafterLogging)
+        {
+            import puppeteer.logging.multifile_gnuplot_crafter_logger;
             return new shared MultifileGnuplotCrafterLogger!(5)(loggingPath);
+        }
         else
+        {
+            import puppeteer.logging.puppeteer_logger;
             return new shared PuppeteerLogger(loggingPath);
+        }
     }
 }

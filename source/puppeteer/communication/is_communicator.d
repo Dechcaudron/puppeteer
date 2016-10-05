@@ -9,13 +9,12 @@ enum isCommunicator(T, IVTypes...) = is(typeof(
 {
     T communicator;
 
-    bool b1 = communicator.startCommunication!( /* this is confusing */ )
+    bool communicationStarted = communicator.startCommunication!( /* this is confusing */ )
                                               (string.init /* devFilename */,
                                               BaudRate.init,
-                                              Parity.init,
-                                              string.init /* logFilename */);
+                                              Parity.init);
     communicator.endCommunication();
-    bool b2 = communicator.isCommunicationOngoing;
+    bool communicationOngoing = communicator.isCommunicationOngoing;
 
     communicator.setAIMonitor(ubyte.init /* pin */, bool.init /* monitor */);
     communicator.setOnAIUpdateCallback(OnAIUpdateCallback.init /* callback */);

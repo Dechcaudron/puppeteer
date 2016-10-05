@@ -380,7 +380,7 @@ void main(string[] args)
 						if(!demoPuppeteer.isCommunicationEstablished)
 						{
 							writeln("Establishing communication with puppet...");
-							if(demoPuppeteer.startCommunication(devFilename, BaudRate.B9600, Parity.none, loggingFilename))
+							if(demoPuppeteer.startCommunication(devFilename, BaudRate.B9600, Parity.none))
 							{
 								writeln("Communication established.");
 							}

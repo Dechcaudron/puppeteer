@@ -5,6 +5,8 @@ mixin template test()
     version(unittest)
         import unit_threaded;
 
+    import puppeteer.puppeteer_creator;
+
     import puppeteer.communication.communication_exception;
 
     import puppeteer.configuration.configuration;
@@ -16,11 +18,11 @@ mixin template test()
     @("Test supported types")
     unittest
     {
-        assert(__traits(compiles, Puppeteer!()));
-        assert(__traits(compiles, Puppeteer!short));
-        assert(!__traits(compiles, Puppeteer!float));
-        assert(!__traits(compiles, Puppeteer!(short, float)));
-        assert(!__traits(compiles, Puppeteer!(short, void)));
+        assert(__traits(compiles, getPuppeteer!()));
+        assert(__traits(compiles, getPuppeteer!short));
+        assert(!__traits(compiles, getPuppeteer!float));
+        assert(!__traits(compiles, getPuppeteer!(short, float)));
+        assert(!__traits(compiles, getPuppeteer!(short, void)));
     }
 
     unittest
@@ -31,8 +33,7 @@ mixin template test()
             void varListener(T)(ubyte var, T receivedValue, T adaptedValue, long msecs) shared {}
         }
 
-        auto a = new shared Puppeteer!(shared BrokenCommunicator!short, short)
-                                        (new shared BrokenCommunicator!short(), new shared Configuration!short, new shared MockLogger);
+        auto a = getPuppeteer!short;
         auto foo = new shared Foo;
 
         assertThrown!CommunicationException(a.endCommunication());
@@ -44,7 +45,7 @@ mixin template test()
 
     unittest
     {
-        auto a = new shared Puppeteer!short(new shared BrokenCommunicator!short(), new shared Configuration!short, new shared MockLogger);
+        auto a = getPuppeteer!short;
 
         assert(a.getPWMFromAverage!5(5) == 255);
         assert(a.getPWMFromAverage!5(0) == 0);

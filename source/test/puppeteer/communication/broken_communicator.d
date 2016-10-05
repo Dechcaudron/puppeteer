@@ -15,7 +15,7 @@ public shared class BrokenCommunicator(IVTypes...)
         return false;
     }
 
-    bool startCommunication(string devFilename, BaudRate baudRate, Parity parity, string logFilename)
+    bool startCommunication()(string devFilename, BaudRate baudRate, Parity parity)
     {
         return false;
     }
@@ -29,5 +29,20 @@ public shared class BrokenCommunicator(IVTypes...)
 
     void setAIMonitor(ubyte pin, bool shouldMonitor) {enforceCommunicationOngoing();}
 
+    void setOnAIUpdateCallback(OnAIUpdateCallback callback)
+    {
+
+    }
+
     void setIVMonitor(IVType)(ubyte varIndex, bool shouldMonitor) {enforceCommunicationOngoing();}
+
+    void setOnIVUpdateCallback(IVType)(OnIVUpdateCallback!IVType callback)
+    {
+
+    }
+
+    private void enforceCommunicationOngoing()
+    {
+        enforce(isCommunicationOngoing);
+    }
 }
