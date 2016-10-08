@@ -20,6 +20,11 @@ public shared class MockPuppetLink(AIMonitorListenerT, IVMonitorListenerT, IVTyp
     @property void IVMonitorListener (IVMonitorListenerT listener)
     {_IVMonitorListener = listener;}
 
+    private bool[ubyte] AIMonitors;
+
+    foreach(IVType; IVTypes)
+        private alias IVMonitors!IVType = bool[ubyte].init;
+
     void startCommunication()
     {
         communicationOpen = true;
@@ -41,6 +46,11 @@ public shared class MockPuppetLink(AIMonitorListenerT, IVMonitorListenerT, IVTyp
     }
 
     void setIVMonitor(VarMonitorTypeCode varMonitorTypeCode, ubyte varIndex, bool monitor)
+    {
+
+    }
+
+    void setPWMOut(ubyte pin, ubyte value)
     {
 
     }

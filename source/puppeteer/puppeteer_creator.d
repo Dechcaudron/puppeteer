@@ -15,10 +15,16 @@ auto getPuppeteer(IVMonitorTypes...)(string loggingPath = "puppeteerLogs")
     version(unittest)
     {
         alias CommunicatorT = shared BrokenCommunicator!IVMonitorTypes;
+        alias PuppetLinkT = shared MockPuppetLink!(CommunicatorT,
+                                                   CommunicatorT,
+                                                   IVMonitorTypes);
     }
     else
     {
         alias CommunicatorT = shared Communicator!IVMonitorTypes;
+        alias PuppetLinkT = shared PuppetLinkT!(CommunicatorT,
+                                                CommunicatorT,
+                                                IVMonitorTypes);
     }
 
     auto a = new shared Puppeteer!(CommunicatorT, IVMonitorTypes)

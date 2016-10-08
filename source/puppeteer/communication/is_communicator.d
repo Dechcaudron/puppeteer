@@ -9,7 +9,7 @@ enum isCommunicator(T, IVTypes...) = is(typeof(
 {
     T communicator;
 
-    bool communicationStarted = communicator.startCommunication!( /* this is confusing */ )
+    bool communicationStarted = communicator.startCommunication
                                               (string.init /* devFilename */,
                                               BaudRate.init,
                                               Parity.init);

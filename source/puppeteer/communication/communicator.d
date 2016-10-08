@@ -20,7 +20,8 @@ import std.meta;
 import core.thread;
 import core.atomic;
 
-shared class Communicator(IVTypes...)
+shared class Communicator(PuppetLinkT, IVTypes...)
+if(isPuppetLink!(PuppetLinkT, shared typeof(this), shared typeof(this)))
 {
     static assert(isCommunicator!(shared typeof(this), IVTypes));
 
@@ -69,13 +70,7 @@ shared class Communicator(IVTypes...)
         id = next_id++;
     }
 
-    public final bool startCommunication(PuppetLinkT = PuppetLink!(shared typeof(this),
-                                                             shared typeof(this),
-                                                             IVTypes))
-                                                             (string devFilename,
-                                                             BaudRate baudRate,
-                                                             Parity parity)
-    if(isPuppetLink!(PuppetLinkT, shared typeof(this), shared typeof(this)))
+    bool startCommunication(string devFilename, BaudRate baudRate, Parity parity)
     {
         enforce!CommunicationException(!isCommunicationOngoing);
 
@@ -87,7 +82,7 @@ shared class Communicator(IVTypes...)
         return msg.success;
     }
 
-    public void endCommunication()
+    void endCommunication()
     {
         enforceCommunicationOngoing();
 
@@ -95,7 +90,7 @@ shared class Communicator(IVTypes...)
         receiveOnly!CommunicationEndedMessage();
     }
 
-    public void setAIMonitor(ubyte pin, bool shouldMonitor)
+    void setAIMonitor(ubyte pin, bool shouldMonitor)
     {
         enforceCommunicationOngoing();
         workerTid.send(PinMonitorMessage(shouldMonitor ?
@@ -103,7 +98,7 @@ shared class Communicator(IVTypes...)
                                             PinMonitorMessage.Action.stop, pin));
     }
 
-    public void setIVMonitor(IVType)(ubyte varIndex, bool shouldMonitor)
+    void setIVMonitor(IVType)(ubyte varIndex, bool shouldMonitor)
     if(staticIndexOf!(IVType, IVTypes) != -1)
     {
         enforceCommunicationOngoing();
@@ -114,24 +109,25 @@ shared class Communicator(IVTypes...)
                                             varMonitorTypeCode!IVType));
     }
 
-    public void setOnAIUpdateCallback(OnAIUpdateCallback callback)
+    void setOnAIUpdateCallback(OnAIUpdateCallback callback)
     {
         onAIUpdateCallback = callback;
     }
 
-    public void setOnIVUpdateCallback(IVType)(OnIVUpdateCallback!IVType callback)
+    void setOnIVUpdateCallback(IVType)(OnIVUpdateCallback!IVType callback)
     {
         onIVUpdateCallback!IVType = callback;
     }
 
-    public void setPWMValue(ubyte pin, ubyte pwmValue)
+    void setPWMValue(ubyte pin, ubyte pwmValue)
     {
         enforceCommunicationOngoing();
         workerTid.send(SetPWMMessage(pin, pwmValue));
     }
 
-    private void communicationLoop(PuppetLinkT)(string fileName, immutable BaudRate baudRate, immutable Parity parity)
-    if(isPuppetLink!(PuppetLinkT, shared typeof(this), shared typeof(this)))
+    private void communicationLoop(string fileName,
+                                   immutable BaudRate baudRate,
+                                   immutable Parity parity)
     {
         enum receiveTimeoutMs = 10;
         enum bytesReadAtOnce = 1;
