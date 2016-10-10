@@ -1,8 +1,5 @@
 module puppeteer.puppet_link.is_puppet_link;
 
-import puppeteer.puppet_link.is_ai_monitor_listener;
-import puppeteer.puppet_link.is_iv_monitor_listener;
-
 import puppeteer.var_monitor_utils;
 
 alias OnAIUpdateCallback = void delegate (ubyte /* pin */,
@@ -28,10 +25,10 @@ enum isPuppetLink(T, IVTypes...) = is(typeof(
     puppetLink.AIMonitorCallback = OnAIUpdateCallback.init /* callback */;
 
     puppetLink.setIVMonitor(VarMonitorTypeCode.init /* IV type */, ubyte.init /* var index */, bool.init /* monitor */);
-    puppetLink.IVMonitorListener = IVMonitorListenerT.init /* listener */;
+
+    foreach(IVType; IVTypes)
+        puppetLink.IVMonitorCallback!IVType = OnIVUpdateCallback!IVType.init /* listener */;
 
     puppetLink.setPWMOut(ubyte.init /* pin */, ubyte.init /* value */);
 }
-())) &&
-isAIMonitorListener!AIMonitorListenerT &&
-isIVMonitorListener!IVMonitorListenerT;
+()));

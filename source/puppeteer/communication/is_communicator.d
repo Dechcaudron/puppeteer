@@ -2,8 +2,14 @@ module puppeteer.communication.is_communicator;
 
 import puppeteer.puppeteer;
 
-alias OnAIUpdateCallback = void delegate (ubyte /* pin */, float /* value */, long /* communicationTimeMillis */) shared ;
-alias OnIVUpdateCallback(T) = void delegate (ubyte /* varIndex */, T /* value */, long /* communicationTimeMillis */) shared;
+alias OnAIUpdateCallback = void delegate (ubyte /* pin */,
+                                          float /* value */,
+                                          long /* communicationTimeMillis */)
+                                          shared;
+alias OnIVUpdateCallback(T) = void delegate (ubyte /* varIndex */,
+                                             T /* value */,
+                                             long /* communicationTimeMillis */)
+                                             shared;
 
 enum isCommunicator(T, IVTypes...) = is(typeof(
 {

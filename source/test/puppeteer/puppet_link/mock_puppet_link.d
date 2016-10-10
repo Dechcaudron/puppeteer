@@ -22,8 +22,7 @@ public shared class MockPuppetLink(AIMonitorListenerT, IVMonitorListenerT, IVTyp
 
     private bool[ubyte] AIMonitors;
 
-    foreach(IVType; IVTypes)
-        private alias IVMonitors!IVType = bool[ubyte].init;
+    
 
     void startCommunication()
     {

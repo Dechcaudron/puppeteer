@@ -21,7 +21,7 @@ import core.thread;
 import core.atomic;
 
 shared class Communicator(PuppetLinkT, IVTypes...)
-if(isPuppetLink!(PuppetLinkT, shared typeof(this), shared typeof(this)))
+if(isPuppetLink!(PuppetLinkT, IVTypes))
 {
     static assert(isCommunicator!(shared typeof(this), IVTypes));
 
@@ -48,11 +48,8 @@ if(isPuppetLink!(PuppetLinkT, shared typeof(this), shared typeof(this)))
 
     private OnAIUpdateCallback onAIUpdateCallback;
 
-    // Generate onIVUpdateCallback fields for IVTypes
-    private mixin(unrollOnIVUpdateCallbackFields!IVTypes());
-
-    // Alias the previous fields
-    alias onIVUpdateCallback(IVType) = Alias!(mixin(onIVUpdateCallbackFieldName!IVType));
+    private Tuple!(staticMap!(OnIVUpdateCallback, IVTypes)) onIVUpdateCallbacks;
+    alias onIVUpdateCallback(IVType) = onIVUpdateCallbacks[staticIndexOf!(IVType, IVTypes)];
 
     @property
     public bool isCommunicationOngoing()
@@ -194,16 +191,4 @@ if(isPuppetLink!(PuppetLinkT, shared typeof(this), shared typeof(this)))
         if(onIVUpdateCallback!IVType !is typeof(onIVUpdateCallback!IVType).init)
             onIVUpdateCallback!IVType(varIndex, value, communicationMillisTime);
     }
-}
-
-private enum onIVUpdateCallbackFieldName(T) = format("_onIVUpdateCallback__Communicator_Internal_%s", T.stringof);
-
-private pure string unrollOnIVUpdateCallbackFields(Ts...)()
-{
-    string str = "";
-    foreach(T; Ts)
-        str ~= format("OnIVUpdateCallback!%s %s;\n",
-                        T.stringof, onIVUpdateCallbackFieldName!T);
-
-    return str;
 }

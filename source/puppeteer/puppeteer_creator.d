@@ -4,6 +4,8 @@ import puppeteer.puppeteer;
 
 import puppeteer.communication.communicator;
 
+import puppeteer.puppet_link.puppet_link;
+
 import puppeteer.configuration.i_configuration;
 
 import puppeteer.logging.i_puppeteer_logger;
@@ -14,17 +16,13 @@ auto getPuppeteer(IVMonitorTypes...)(string loggingPath = "puppeteerLogs")
 {
     version(unittest)
     {
+        alias PuppetLinkT = shared MockPuppetLink!(IVMonitorTypes);
         alias CommunicatorT = shared BrokenCommunicator!IVMonitorTypes;
-        alias PuppetLinkT = shared MockPuppetLink!(CommunicatorT,
-                                                   CommunicatorT,
-                                                   IVMonitorTypes);
     }
     else
     {
-        alias CommunicatorT = shared Communicator!IVMonitorTypes;
-        alias PuppetLinkT = shared PuppetLinkT!(CommunicatorT,
-                                                CommunicatorT,
-                                                IVMonitorTypes);
+        alias PuppetLinkT = shared PuppetLink!(IVMonitorTypes);
+        alias CommunicatorT = shared Communicator!(PuppetLinkT, IVMonitorTypes);
     }
 
     auto a = new shared Puppeteer!(CommunicatorT, IVMonitorTypes)

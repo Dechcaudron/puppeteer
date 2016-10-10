@@ -5,6 +5,8 @@ import std.exception;
 import std.format;
 import std.conv;
 import std.stdio;
+import std.typecons;
+import std.meta;
 
 import core.thread;
 
@@ -14,30 +16,28 @@ import puppeteer.serial.ox_serial_port_wrapper;
 import puppeteer.var_monitor_utils;
 
 import puppeteer.puppet_link.is_puppet_link;
-import puppeteer.puppet_link.is_ai_monitor_listener;
-import puppeteer.puppet_link.is_iv_monitor_listener;
 
-public class PuppetLink(AIMonitorListenerT, IVMonitorListenerT, IVTypes...)
-if(isAIMonitorListener!AIMonitorListenerT && isIVMonitorListener!(IVMonitorListenerT, IVTypes))
+public class PuppetLink(IVTypes...)
 {
-    static assert(isPuppetLink!(typeof(this), AIMonitorListenerT, IVMonitorListenerT));
+    static assert(isPuppetLink!(typeof(this), IVTypes));
 
     private ISerialPort serialPort;
 
-    private AIMonitorListenerT _AIMonitorListener;
+    private OnAIUpdateCallback onAIUpdateCallback;
 
     @property
-    AIMonitorListener(AIMonitorListenerT listener)
+    AIMonitorCallback(OnAIUpdateCallback callback)
     {
-        _AIMonitorListener = listener;
+        onAIUpdateCallback = callback;
     }
 
-    private IVMonitorListenerT _IVMonitorListener;
+    private Tuple!(staticMap!(OnIVUpdateCallback, IVTypes)) onIVUpdateCallbacks;
+    private alias onIVUpdateCallback(IVType) = Alias!(onIVUpdateCallbacks[staticIndexOf!(IVType, IVTypes)]);
 
     @property
-    IVMonitorListener(IVMonitorListenerT listener)
+    IVMonitorCallback(IVType)(OnIVUpdateCallback!IVType callback)
     {
-        _IVMonitorListener = listener;
+        onIVUpdateCallbacks[staticIndexOf!(IVType, IVTypes)] = callback;
     }
 
     private enum ubyte commandControlByte = 0xff;
@@ -206,7 +206,7 @@ if(isAIMonitorListener!AIMonitorListenerT && isIVMonitorListener!(IVMonitorListe
     {
         debug(2) writeln("Handling analogMonitorCommand ", command);
 
-        if(_AIMonitorListener is AIMonitorListenerT.init)
+        if(onAIUpdateCallback is AIMonitorListenerT.init)
             return;
 
         ubyte pin = cmd[1];
@@ -218,7 +218,7 @@ if(isAIMonitorListener!AIMonitorListenerT && isIVMonitorListener!(IVMonitorListe
         ushort encodedValue = cmd[2] * possibleValues + cmd[3];
         float readValue =  analogReference * to!float(encodedValue) / analogReadMax;
 
-        _AIMonitorListener.onAIUpdate(pin, readValue, communicationMsTime);
+        onAIUpdateCallback.onAIUpdate(pin, readValue, communicationMsTime);
     }
 
     private void handleVarMonitorCommand(ubyte[] cmd, long communicationMsTime)
